@@ -22,7 +22,7 @@ Pod::Spec.new do |s|
     rule and naming convention.
   DESC
   s.homepage     = "https://github.com/kontextso/kontextkit-ios"
-  s.license      = "MIT"
+  s.license      = { :type => "Apache-2.0", :file => "LICENSE" }
   s.authors      = { "Kontext" => "support@kontext.so" }
 
   s.platforms    = { :ios => "14.0" }
