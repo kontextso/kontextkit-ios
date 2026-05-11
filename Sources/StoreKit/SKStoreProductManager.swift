@@ -44,6 +44,12 @@ public final class SKStoreProductManager: NSObject, @preconcurrency SKStoreProdu
         }
 
         if presentedViewController != nil || Scenes.topViewController() is SKStoreProductViewController {
+            // `params` is `[String: Any]` (StoreKit's required shape), which
+            // isn't Sendable. Capturing it directly into the @Sendable Task
+            // closure trips Swift 6 strict-concurrency. Building it on
+            // MainActor and consuming it on MainActor is actually safe — the
+            // wrapper expresses that with @unchecked Sendable.
+            let sendableParams = UncheckedSendable(params)
             dismiss { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self else {
@@ -54,7 +60,7 @@ public final class SKStoreProductManager: NSObject, @preconcurrency SKStoreProdu
                         completion(false, Errors.make(domain: "DISMISS_FAILED", message: "Failed to dismiss existing product view before presenting a new one"))
                         return
                     }
-                    self.loadAndPresent(params: params, completion: completion)
+                    self.loadAndPresent(params: sendableParams.value, completion: completion)
                 }
             }
             return

@@ -26,9 +26,11 @@ jobs:
           set -o pipefail
           # Clean build (no -quiet) so the log includes per-file swiftc
           # invocations — `swiftlint analyze` parses those to find sources.
+          # `generic/platform=iOS Simulator` doesn't require a concrete
+          # simulator instance to exist — robust across Xcode/runner versions.
           xcodebuild clean build \
             -scheme KontextKit \
-            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest,arch=arm64' \
+            -destination 'generic/platform=iOS Simulator' \
             -skipPackagePluginValidation \
             > xcodebuild.log 2>&1 || (tail -100 xcodebuild.log; exit 1)
 
@@ -41,14 +43,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: List available simulators
-        run: xcrun simctl list devices available | grep iPhone | head -5
+      - name: Resolve test simulator
+        id: simulator
+        run: |
+          set -euo pipefail
+          # Pick any available iPhone simulator. Falls back to creating
+          # one if the runner image ships with none (which has happened
+          # on some macos-15 image revisions).
+          SIM_ID=$(xcrun simctl list devices available -j \
+            | python3 -c "import json,sys; data=json.load(sys.stdin); \
+                print(next((d['udid'] for runtime,devs in data['devices'].items() if 'iOS' in runtime \
+                  for d in devs if d.get('isAvailable') and d['name'].startswith('iPhone')), ''))")
+          if [ -z "$SIM_ID" ]; then
+            echo "No iPhone simulator available; creating one"
+            RUNTIME=$(xcrun simctl list runtimes -j \
+              | python3 -c "import json,sys; data=json.load(sys.stdin); \
+                  print(next((r['identifier'] for r in data['runtimes'] if r.get('isAvailable') and r['platform']=='iOS'), ''))")
+            if [ -z "$RUNTIME" ]; then
+              echo "::error::No iOS simulator runtime found on this runner."
+              exit 1
+            fi
+            SIM_ID=$(xcrun simctl create "kontextkit-test-iphone" "iPhone 16 Pro" "$RUNTIME")
+          fi
+          echo "Using simulator: $SIM_ID"
+          echo "id=$SIM_ID" >> "$GITHUB_OUTPUT"
 
       - name: Build and test
         run: |
           set -o pipefail
           xcodebuild test \
             -scheme KontextKit \
-            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest,arch=arm64' \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}" \
             -skipPackagePluginValidation \
             -quiet

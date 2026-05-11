@@ -30,10 +30,10 @@ struct SKStoreProductManagerTests {
         manager.pendingPresentCompletion = { _, _ in }
         defer { manager.pendingPresentCompletion = nil }
 
-        var dismissed: Bool?
-        manager.dismiss { dismissed = $0 }
+        let dismissed = TestBox<Bool>()
+        manager.dismiss { dismissed.value = $0 }
 
-        #expect(dismissed == false)
+        #expect(dismissed.value == false)
     }
 
     // MARK: - applySkanParams
@@ -143,7 +143,14 @@ struct SKStoreProductManagerTests {
     @Test func applySkanParamsOmitsSourceIdentifierWhenMissing() {
         guard #available(iOS 16.1, *) else { return }
         var params: [String: Any] = [:]
-        SKStoreProductManager.applySkanParams(Self.makeValidSkanDict(), into: &params)
+        _ = SKStoreProductManager.applySkanParams(Self.makeValidSkanDict(), into: &params)
         #expect(params[SKStoreProductParameterAdNetworkSourceIdentifier] == nil)
     }
+}
+
+/// Mutable reference-typed box for capturing in @Sendable test closures.
+/// The completion runs on the same MainActor that reads it back, so
+/// @unchecked Sendable is sound for test use.
+private final class TestBox<T>: @unchecked Sendable {
+    var value: T?
 }

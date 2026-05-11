@@ -1,5 +1,8 @@
 import Foundation
-import StoreKit
+// SKAdImpression isn't annotated Sendable in the StoreKit headers, even
+// though it's an immutable value-carrying class. We only ever touch it
+// from MainActor — `@preconcurrency` tells the compiler to trust that.
+@preconcurrency import StoreKit
 
 @MainActor
 public final class SKAdNetworkManager {
