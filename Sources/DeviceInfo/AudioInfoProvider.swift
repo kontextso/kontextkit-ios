@@ -1,4 +1,4 @@
-import Foundation
+// swiftlint:disable:next unused_import
 import AVFoundation
 
 /// Provides audio information for ad targeting and viewability.

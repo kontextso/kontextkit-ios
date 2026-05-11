@@ -1,4 +1,3 @@
-import Foundation
 import UIKit
 
 /// Provides screen information for ad targeting.

@@ -1,5 +1,3 @@
-import Foundation
-
 /// SKAdNetwork input parsing shared by `SKStoreProductManager`,
 /// `SKOverlayManager`, and `SKAdNetworkManager`. All three consume the
 /// same SKAdNetwork dict shape from the bridge layer; the type

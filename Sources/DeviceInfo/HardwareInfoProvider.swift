@@ -1,4 +1,3 @@
-import Foundation
 import UIKit
 
 /// Provides hardware device information for ad targeting.

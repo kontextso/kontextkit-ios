@@ -1,6 +1,4 @@
-import Foundation
 import StoreKit
-import UIKit
 
 @MainActor
 public final class SKOverlayManager: NSObject {

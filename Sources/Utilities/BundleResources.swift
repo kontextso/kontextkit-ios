@@ -1,6 +1,8 @@
 import Foundation
 
+#if !SWIFT_PACKAGE
 private final class BundleToken {}
+#endif
 
 extension Bundle {
     /// Resource bundle accessor that works under both Swift Package

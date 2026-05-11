@@ -1,6 +1,5 @@
-import Foundation
-import Network
 import CoreTelephony
+import Network
 import WebKit
 
 /// Provides network information for ad targeting and analytics.
