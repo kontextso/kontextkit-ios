@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: SwiftLint version
+        run: swiftlint --version
+
+      - name: Run SwiftLint
+        run: swiftlint lint --reporter github-actions-logging
+
+      - name: Build for SwiftLint analyze
+        run: |
+          set -o pipefail
+          # Clean build (no -quiet) so the log includes per-file swiftc
+          # invocations — `swiftlint analyze` parses those to find sources.
+          xcodebuild clean build \
+            -scheme KontextKit \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest,arch=arm64' \
+            -skipPackagePluginValidation \
+            > xcodebuild.log 2>&1 || (tail -100 xcodebuild.log; exit 1)
+
+      - name: Run SwiftLint analyze
+        run: swiftlint analyze --compiler-log-path xcodebuild.log --reporter github-actions-logging
+
+  test:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List available simulators
+        run: xcrun simctl list devices available | grep iPhone | head -5
+
+      - name: Build and test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme KontextKit \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest,arch=arm64' \
+            -skipPackagePluginValidation \
+            -quiet

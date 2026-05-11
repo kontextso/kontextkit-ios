@@ -130,7 +130,7 @@ public final class OMManager: OMManaging {
     /// SDKs inject this at WebView creation (`atDocumentStart`) so the
     /// OMID JS layer is present before any ad content loads.
     public static func omsdkScript() -> String? {
-        guard let url = Bundle.module.url(forResource: "omsdk-v1", withExtension: "js"),
+        guard let url = Bundle.kontextKitResources.url(forResource: "omsdk-v1", withExtension: "js"),
               let script = try? String(contentsOf: url, encoding: .utf8) else {
             return nil
         }

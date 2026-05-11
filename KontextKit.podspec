@@ -29,7 +29,9 @@ Pod::Spec.new do |s|
   s.source       = { :git => "https://github.com/kontextso/kontextkit-ios.git", :tag => "#{s.version}" }
 
   s.source_files = "Sources/**/*.swift"
-  s.resources = "Sources/OMSDK/omsdk-v1.js", "Sources/PrivacyInfo.xcprivacy"
+  s.resource_bundles = {
+    "KontextKit" => ["Sources/OMSDK/omsdk-v1.js", "Sources/PrivacyInfo.xcprivacy"]
+  }
   s.vendored_frameworks = "Frameworks/OMSDK_Kontextso.xcframework"
   s.frameworks = "SafariServices", "AdSupport", "AppTrackingTransparency",
                  "StoreKit", "CoreTelephony", "AVFoundation", "Network", "WebKit"
