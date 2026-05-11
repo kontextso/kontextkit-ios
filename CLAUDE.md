@@ -34,12 +34,12 @@ Why not `*Service`? Not iOS-idiomatic; Apple uses `*Manager` for the same shape 
 
 ```
 Sources/
-  DeviceInfo/        AdvertisingIdProvider, App/HW/OS/Screen/Battery/Audio/NetworkInfoProvider, BrightnessManager, TrackingAuthorizationManager
-  Privacy/           TCFDataProvider
-  StoreKit/          SKAdNetworkManager, SKAdNetworkIdsProvider, SKOverlayManager, SKStoreProductManager
-  UI/                InAppBrowserManager
+  DeviceInfo/        AdvertisingIdProvider, App/HW/OS/Screen/Battery/Audio/NetworkInfoProvider, BrightnessManager
+  Privacy/           TCFDataProvider, TrackingAuthorizationManager
+  StoreKit/          SKAdNetworkManager, SKAdNetworkIdsProvider, SKAdNetworkParsing, SKOverlayManager, SKStoreProductManager
+  UI/                InAppBrowserManager, Scenes
   OMSDK/             OMManager, OMSession, OMPartner, OMCreativeType, omsdk-v1.js
-  Utilities/         JSONParsing, ValueCoercion, Errors
+  Utilities/         BundleResources, Errors, JSONParsing, ValueCoercion
   PrivacyInfo.xcprivacy
 Tests/               mirrors Sources/ layout
 Frameworks/          OMSDK_Kontextso.xcframework (binary, IAB-shipped)
@@ -79,4 +79,4 @@ Versioning: semver. The xcframework version (IAB OMID) is independent of Kontext
 
 - [sdk-swift](https://github.com/kontextso/sdk-swift) — primary consumer; ships KontextKit transitively
 - [sdk-v4](https://github.com/kontextso/sdk-v4) — monorepo; KontextKit was historically developed here before extraction
-- [kontextkit-android](https://github.com/kontextso/kontextkit-kotlin) — Android counterpart (planned)
+- [kontextkit-kotlin](https://github.com/kontextso/kontextkit-kotlin) — Android counterpart (planned)
