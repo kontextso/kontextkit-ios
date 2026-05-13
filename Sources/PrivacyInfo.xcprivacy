@@ -14,10 +14,10 @@
       <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
       <key>NSPrivacyAccessedAPITypeReasons</key>
       <array>
-        <!-- 3B52.1: file timestamps inside the app's container.
-             AppInfoProvider reads the Documents directory creation date
-             as a first-install-time proxy. -->
-        <string>3B52.1</string>
+        <!-- C617.1: timestamps/size/metadata of files inside the app
+             container. AppInfoProvider reads the Documents directory
+             creation date as a first-install-time proxy. -->
+        <string>C617.1</string>
       </array>
     </dict>
     <dict>
