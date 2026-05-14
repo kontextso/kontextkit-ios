@@ -89,8 +89,10 @@ git push origin 1.0.0
 ## 7. Publish to CocoaPods trunk
 
 ```bash
-pod trunk push KontextKit.podspec --allow-warnings
+pod trunk push KontextKit.podspec --allow-warnings --use-libraries
 ```
+
+`--use-libraries` matches the local-lint flag in step 1.6 — without it, recent Xcode SDKs auto-link `SwiftUICore.tbd` (and `CoreAudioTypes` / `UIUtilities`) into the static-framework build and `pod trunk push` fails server-side validation with a linker error. Library-mode validation matches CocoaPods's runtime resolution for static-framework consumers, so dropping the flag isn't a release-quality risk — it's just a build-graph hint the validator needs.
 
 First-time only: `pod trunk register support@kontext.so "Kontext"` and confirm via the link sent to that mailbox.
 
