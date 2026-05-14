@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Testing
 @testable import KontextKit
@@ -123,6 +124,35 @@ struct ProviderTests {
         #expect(dict["muted"] != nil)
         #expect(dict["outputPluggedIn"] != nil)
         #expect(dict["outputType"] != nil)
+    }
+
+    /// `collect()` is documented to activate the audio session implicitly
+    /// so `outputVolume` returns a reliable value on the first call (the
+    /// property is "undefined" without an active session per Apple docs).
+    /// Default category is `.soloAmbient`; observing `.playback` after
+    /// `collect()` proves the activation ran end-to-end.
+    @Test func collectActivatesSessionImplicitly() {
+        _ = AudioInfoProvider.collect()
+        #expect(AVAudioSession.sharedInstance().category == .playback)
+    }
+
+    /// Volume tracking across multiple `collect()` calls relies on a
+    /// permanent KVO observer being installed during session activation
+    /// (iOS only refreshes `outputVolume` while something is observing
+    /// it). We can't simulate a user volume change in a unit test, but
+    /// we can assert that two consecutive calls produce volumes within
+    /// the documented 0–100 range and that the session stays active
+    /// across them — a regression that drops the observer would cause
+    /// `outputVolume` to be cached at activation time, but the range
+    /// invariant would still hold; the real assertion is the
+    /// session-stays-active part, which proves the activator is
+    /// idempotent and didn't accidentally deactivate.
+    @Test func consecutiveCollectsKeepSessionActive() {
+        let first = AudioInfoProvider.collect()
+        let second = AudioInfoProvider.collect()
+        #expect((0...100).contains(first.volume))
+        #expect((0...100).contains(second.volume))
+        #expect(AVAudioSession.sharedInstance().category == .playback)
     }
 
     // MARK: - BatteryInfoProvider

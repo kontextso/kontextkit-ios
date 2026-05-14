@@ -78,4 +78,34 @@ struct NetworkInfoProviderTests {
         let dict = await NetworkInfoProvider.collectAsDict()
         #expect(dict["carrier"] == nil)
     }
+
+    // MARK: - detail gating
+
+    /// `detail` describes the *active connection's* access technology.
+    /// CoreTelephony reports the cellular radio's RAT even when Wi-Fi
+    /// is the active path (the radio stays up on 5G/LTE for calls and
+    /// fallback) — without gating, the SDK would ship `{type: "wifi",
+    /// detail: "5g"}`, which misrepresents the data path to DSPs.
+    ///
+    /// Sim/CI runners report `type == "wifi"` or `"other"`, never
+    /// `"cellular"`. So at least on those, `detail` MUST be nil. (A
+    /// real cellular device exercises the positive branch via the
+    /// `mapRadioAccess` table tests above plus the production code
+    /// path.)
+    @Test @MainActor func detailIsNilOnNonCellular() async {
+        let info = await NetworkInfoProvider.collect()
+        if info.type != "cellular" {
+            #expect(info.detail == nil)
+        }
+    }
+
+    @Test @MainActor func dictOmitsDetailOnNonCellular() async {
+        let info = await NetworkInfoProvider.collect()
+        let dict = await NetworkInfoProvider.collectAsDict()
+        if info.type != "cellular" {
+            // Bridge dict drops nil — sdk-react-native / sdk-flutter
+            // consumers see "field absent", not NSNull.
+            #expect(dict["detail"] == nil)
+        }
+    }
 }

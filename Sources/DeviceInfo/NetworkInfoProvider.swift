@@ -58,10 +58,18 @@ public enum NetworkInfoProvider {
         // their latencies; concurrent awaits cap at the slower of the two.
         async let type = currentNetworkType()
         async let userAgent = currentUserAgent()
-        let detail = currentRadioDetail()   // synchronous, no await
+
+        let resolvedType = await type
+        // CoreTelephony reports the cellular radio's access tech even
+        // when Wi-Fi is the active path (the radio stays up on 5G/LTE
+        // for calls and fallback). Gating on `type == "cellular"`
+        // keeps `detail` describing the connection that's actually
+        // carrying data. Mirrors sdk-react-native's
+        // AdsProvider.tsx behaviour.
+        let detail = resolvedType == "cellular" ? currentRadioDetail() : nil
 
         return NetworkInfo(
-            type: await type,
+            type: resolvedType,
             carrier: nil,
             detail: detail,
             userAgent: await userAgent
