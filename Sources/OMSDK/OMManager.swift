@@ -1,3 +1,4 @@
+import AVFAudio
 import Foundation
 @preconcurrency import OMSDK_Kontextso
 import WebKit
@@ -50,13 +51,25 @@ public final class OMManager: OMManaging {
     /// stabilization (matching sdk-kotlin / sdk-react-native), and starts
     /// the session on the main actor.
     ///
-    /// For `creativeType == .video`, also ensures the shared
-    /// `AVAudioSession` is active (`.playback + .mixWithOthers`) so OMID's
-    /// device-volume KVO can fire — required for IAB certification of
-    /// HTML video ads (sdk-swift PR #119). The activation is one-shot via
-    /// `AudioInfoProvider.ensureSessionActive()`; `AudioInfoProvider`
-    /// owns the single shared activator used by both `isSoundOn()` and
-    /// us, so we never thrash the session.
+    /// For `creativeType == .video`, calls `setCategory(.playback,
+    /// .mixWithOthers) + setActive(true)` on the shared `AVAudioSession`
+    /// per-session, immediately before the OMID session is created — the
+    /// exact pattern from the IAB OMSDK demo (WebViewVideoController.swift)
+    /// and the sdk-swift v3 certification (PR #119). OMID's internal
+    /// device-volume KVO observer relies on the session being freshly
+    /// active at session-start time; a one-shot lazy activation that
+    /// happens earlier in the app lifecycle (e.g. during the first
+    /// `/preload`'s `getDevice()`) is not equivalent — iOS stops
+    /// publishing `outputVolume` changes once an interposing audio
+    /// source (the WKWebView's media element) takes over, even with
+    /// `.mixWithOthers`. Errors are swallowed so a failed activation
+    /// never blocks OMID session creation; the worst case is missing
+    /// `deviceVolume` change events.
+    ///
+    /// Intentionally does NOT call `setActive(false)` when the session
+    /// finishes — that path was the root of the 1-second audio-cut bug
+    /// fixed in sdk-flutter PR #51, and the active session is gentle on
+    /// host audio thanks to `.mixWithOthers`.
     ///
     /// Honours cancellation: if the caller cancels during the 50 ms
     /// settle window, this throws `CancellationError` rather than going
@@ -67,7 +80,9 @@ public final class OMManager: OMManaging {
         creativeType: OMCreativeType
     ) async throws -> OMSession {
         if creativeType == .video {
-            _ = AudioInfoProvider.ensureSessionActive()
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try? session.setActive(true)
         }
         try await Task.sleep(nanoseconds: 50_000_000)
         guard isActive else {

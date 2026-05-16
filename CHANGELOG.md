@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.0.4
+* `OMManager.createSession` now activates the shared `AVAudioSession` with `.playback + .mixWithOthers + setActive(true)` **per video OMID session** — once per call, immediately before the OMID session is created. Restores the per-session activation pattern from sdk-swift v3 PR #119 (which is what IAB Tech Lab certified for HTML video ads) and the IAB OMSDK demo's `WebViewVideoController.swift`. The previous one-shot lazy activation through `AudioInfoProvider.ensureSessionActive()` was a regression: device-volume KVO observed by OMID would freeze after the first `/preload`-driven activation, so hardware volume-up/-down events never reached the validation script. With this change, device-volume `volumeChange` events fire correctly on every hardware press. No deactivation path — calling `setActive(false, .notifyOthersOnDeactivation)` is what produced the 1-second audio-cut bug in sdk-flutter PR #51, and `.mixWithOthers` keeps the active session gentle on host audio so a permanent activation is fine.
+
 ## 0.0.3
 * `InstallIdProvider` — new device-info provider returning a per-app-install identifier (UUID v7) persisted in `UserDefaults` under `"kontextso.installId"`. Generated on first call, validated against the canonical UUID shape on read (overwrites on corruption), and stable across launches and conversations until the user uninstalls or clears app data. Sibling iOS SDKs (sdk-swift, sdk-react-native, sdk-flutter) attach it to every `/init`, `/preload`, `/error`, and `/debug` request so the ad server can key pacing, frequency caps, and per-install diagnostics to a stable identity independent of `conversationId` or `userId`.
 
