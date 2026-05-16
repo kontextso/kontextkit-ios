@@ -2,8 +2,16 @@ import Foundation
 import Testing
 @testable import KontextKit
 
-private let uuidV7Regex = #/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/#
+private let uuidV7Pattern = "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 private let storageKey = "kontextso.installId"
+
+/// Pattern-match helper that doesn't require iOS 16+ (`Regex` /
+/// `#/.../#` literal). `String.range(of:options:)` with
+/// `.regularExpression` has been around since iOS 4 — keeps the test
+/// file buildable against KontextKit's iOS 14 deployment target.
+private func matchesV7Shape(_ id: String) -> Bool {
+    id.range(of: uuidV7Pattern, options: .regularExpression) != nil
+}
 
 /// Builds a fresh UserDefaults backed by a unique suite name so each
 /// test gets isolated storage — avoids cross-test contamination on the
@@ -18,7 +26,7 @@ private func freshDefaults(_ suite: String = UUID().uuidString) -> UserDefaults 
 struct UUIDv7Tests {
     @Test func producesCanonicalV7Shape() {
         let id = InstallIdProvider.uuidv7()
-        #expect(id.contains(uuidV7Regex))
+        #expect(matchesV7Shape(id))
     }
 
     @Test func encodesCurrentTimestampInPrefix() {
@@ -47,7 +55,7 @@ struct InstallIdProviderTests {
     @Test func generatesAndPersistsOnFirstCall() {
         let defaults = freshDefaults()
         let id = InstallIdProvider.getOrCreate(defaults: defaults)
-        #expect(id.contains(uuidV7Regex))
+        #expect(matchesV7Shape(id))
         #expect(defaults.string(forKey: storageKey) == id)
     }
 
@@ -86,7 +94,7 @@ struct InstallIdProviderTests {
         let defaults = freshDefaults()
         defaults.set(malformed, forKey: storageKey)
         let id = InstallIdProvider.getOrCreate(defaults: defaults)
-        #expect(id.contains(uuidV7Regex))
+        #expect(matchesV7Shape(id))
         #expect(id != malformed)
         // Replacement is persisted so subsequent calls see the same value.
         #expect(defaults.string(forKey: storageKey) == id)
