@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name         = "KontextKit"
-  s.version      = "0.0.2"
+  s.version      = "0.0.3"
   s.summary      = "Kontext shared native modules for iOS SDKs"
   s.description  = <<-DESC
     KontextKit bundles the iOS-native primitives shared across every Kontext
