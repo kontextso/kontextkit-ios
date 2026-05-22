@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name         = "KontextKit"
-  s.version      = "0.0.4"
+  s.version      = "0.0.5"
   s.summary      = "Kontext shared native modules for iOS SDKs"
   s.description  = <<-DESC
     KontextKit bundles the iOS-native primitives shared across every Kontext
@@ -13,7 +13,10 @@ Pod::Spec.new do |s|
     - StoreKit attribution (`SKAdNetworkManager`, `SKOverlayManager`,
       `SKStoreProductManager`, `SKAdNetworkIdsProvider`).
     - IAB OMID (Open Measurement) integration via the bundled
-      `OMSDK_Kontextso.xcframework`.
+      `OMSDK_Kontextso.xcframework`. The xcframework is redistributed
+      unmodified under the IAB Tech Lab OM License v1.1 (see
+      `Frameworks/OMLICENSE`); KontextKit's own Swift sources remain
+      Apache-2.0.
     - IAB TCF (Transparency & Consent Framework) UserDefaults reader.
     - Brightness control, in-app browser (`SFSafariViewController`).
 
@@ -33,6 +36,11 @@ Pod::Spec.new do |s|
     "KontextKit" => ["Sources/OMSDK/omsdk-v1.js", "Sources/PrivacyInfo.xcprivacy"]
   }
   s.vendored_frameworks = "Frameworks/OMSDK_Kontextso.xcframework"
+  # IAB Tech Lab OM License v1.1 — required (Section 4(a)) to be
+  # shipped with any Object-form redistribution of the OMSDK
+  # xcframework. `preserve_paths` keeps the file in the published
+  # pod without compiling or processing it.
+  s.preserve_paths = "Frameworks/OMLICENSE"
   s.frameworks = "SafariServices", "AdSupport", "AppTrackingTransparency",
                  "StoreKit", "CoreTelephony", "AVFoundation", "Network", "WebKit"
   s.swift_version = "5.9"
