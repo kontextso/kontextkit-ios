@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.0.5
 * `Frameworks/OMLICENSE`: ship the IAB Tech Lab OM License v1.1 text alongside the bundled `OMSDK_Kontextso.xcframework`. Required by OM License Section 4(a) for any Object-form redistribution — without this file in the published pod, downstream consumers receive the binary but not the license text it ships under. Wired into the podspec via `s.preserve_paths`. The xcframework binary is unchanged (still IAB OMSDK 1.6.4); this is a license-compliance fix only. Mirrors the equivalent fix for the Android redistribution in `kontextkit-android` 0.0.6 (`omsdk-android/LICENSE`). KontextKit's own Swift sources remain Apache-2.0.
 
 ## 0.0.4
