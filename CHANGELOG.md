@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0
+### Breaking
+`NetworkInfoProvider` no longer detects `network.type`. `NetworkInfo.type` is now `String?` (always nil), `NetworkInfo.detail` is removed, and `collectAsDict()` omits the `type`, `carrier`, and `detail` keys. Consumers that read these fields (sdk-swift, sdk-react-native, sdk-flutter) must update — only `userAgent` is still populated.
+
+* Remove on-device `network.type` detection. It resolved the type by bridging `NWPathMonitor.pathUpdateHandler` into a `CheckedContinuation`, but that handler is not one-shot: it re-fires on every path change and `monitor.cancel()` does not retract callbacks already dispatched to the monitor's queue, so a second callback resumed the continuation twice and crashed the app (`EXC_BREAKPOINT`) on flapping/constrained networks. This ran on every `/preload`, so at scale it was a high-volume production crash present in every KontextKit release to date (and in sdk-swift 1.0.5+ before the code was extracted here). The ad server does not use `network.type` for ad selection — it only forwards it to DSPs as OpenRTB `connectiontype` — so the value is removed rather than guarded: a continuation that no longer exists cannot be double-resumed.
+* Drop `network.carrier` and `network.detail` collection (CoreTelephony). `carrier` was already always nil on iOS 16+; `detail` (cellular radio access technology) was only meaningful alongside `type`. `userAgent` — the one field the ad server consumes — is unchanged.
+
 ## 0.0.5
 * `Frameworks/OMLICENSE`: ship the IAB Tech Lab OM License v1.1 text alongside the bundled `OMSDK_Kontextso.xcframework`. Required by OM License Section 4(a) for any Object-form redistribution — without this file in the published pod, downstream consumers receive the binary but not the license text it ships under. Wired into the podspec via `s.preserve_paths`. The xcframework binary is unchanged (still IAB OMSDK 1.6.4); this is a license-compliance fix only. Mirrors the equivalent fix for the Android redistribution in `kontextkit-android` 0.0.6 (`omsdk-android/LICENSE`). KontextKit's own Swift sources remain Apache-2.0.
 
