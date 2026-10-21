@@ -1,12 +1,16 @@
 import Testing
+import UIKit
 @testable import KontextKit
 
 @MainActor
 struct OSInfoProviderTests {
 
-    @Test func osInfoNameIsLowercaseIos() {
+    /// `ios` on an iPhone, `ipados` on an iPad: the simulator decides which.
+    @Test func osInfoNameFollowsTheIdiom() {
         let info = OSInfoProvider.collect()
-        #expect(info.name == "ios")
+        let expected: OSInfoProvider.OSName = UIDevice.current.userInterfaceIdiom == .pad ? .ipados : .ios
+        #expect(info.name == expected)
+        #expect(OSInfoProvider.OSName.ipados.rawValue == "ipados")
     }
 
     @Test func osInfoVersionIsNonEmpty() {
@@ -42,7 +46,7 @@ struct OSInfoProviderTests {
 
     @Test func osInfoAsDictHasAllKeys() {
         let dict = OSInfoProvider.collectAsDict()
-        #expect(dict["name"] as? String == "ios")
+        #expect(["ios", "ipados"].contains(dict["name"] as? String))
         #expect(dict["version"] != nil)
         #expect(dict["locale"] != nil)
         #expect(dict["timezone"] != nil)

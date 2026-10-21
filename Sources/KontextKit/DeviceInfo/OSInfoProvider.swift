@@ -8,8 +8,16 @@ import UIKit
 /// platform name.
 public enum OSInfoProvider {
 
+    /// The operating system, as Apple names it. iPadOS is reported as
+    /// such; a consumer whose server keeps a single `ios` maps it.
+    public enum OSName: String, Sendable {
+        case ios
+        case ipados
+        case tvos
+    }
+
     public struct OSInfo: Sendable {
-        public let name: String       // Always "ios" on iOS — matches server's `osSchema` example
+        public let name: OSName
         public let version: String    // e.g. "17.4"
         public let locale: String     // BCP-47, e.g. "en-US" (NOT POSIX "en_US")
         public let timezone: String   // IANA, e.g. "Europe/Prague"
@@ -18,11 +26,20 @@ public enum OSInfoProvider {
     @MainActor
     public static func collect() -> OSInfo {
         OSInfo(
-            name: "ios",
+            name: osName(),
             version: UIDevice.current.systemVersion,
             locale: bcp47Locale(),
             timezone: TimeZone.current.identifier
         )
+    }
+
+    @MainActor
+    private static func osName() -> OSName {
+        #if os(tvOS)
+        return .tvos
+        #else
+        return UIDevice.current.userInterfaceIdiom == .pad ? .ipados : .ios
+        #endif
     }
 
     /// Returns the current locale as a BCP-47 language tag (`en-US`).
@@ -48,7 +65,7 @@ public enum OSInfoProvider {
     public static func collectAsDict() -> [String: Any] {
         let info = collect()
         return [
-            "name": info.name,
+            "name": info.name.rawValue,
             "version": info.version,
             "locale": info.locale,
             "timezone": info.timezone,
