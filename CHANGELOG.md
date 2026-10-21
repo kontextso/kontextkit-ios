@@ -4,8 +4,8 @@
 ### Breaking
 KontextKit reports facts as typed values; each SDK maps them to its own server's words.
 
-* `OSInfoProvider.OSInfo.name` is an `OSName` enum (`ios`, `ipados`, `tvos`) instead of the string `"ios"`; an iPad reports `.ipados`. `collectAsDict()` emits the raw value. A consumer whose server keeps a single `ios` maps `.ipados` to it.
-* `HardwareInfoProvider.HardwareInfo.type` is a `HardwareType` enum (`phone`, `tablet`, `tv`, `desktop`, `other`, the OpenRTB-derived set) instead of `"handset"` / `"tablet"` / `"other"`; Catalyst reports `.desktop`, tvOS `.tv`. A consumer whose server says `handset` maps `.phone` to it.
+* `OSInfoProvider.OSInfo.name` is an `OSName` enum (`ios`, `ipados`, `tvos`; `Codable`, so a consumer can put it straight in a request) instead of the string `"ios"`; an iPad reports `.ipados`. `collectAsDict()` emits the raw value. A consumer whose server keeps a single `ios` maps `.ipados` to it.
+* `HardwareInfoProvider.HardwareInfo.type` is a `HardwareType` enum (`phone`, `tablet`, `tv`, `desktop`, `other`, the OpenRTB-derived set; `Codable`) instead of `"handset"` / `"tablet"` / `"other"`; Catalyst reports `.desktop`, tvOS `.tv`. A consumer whose server says `handset` maps `.phone` to it.
 * `TCFDataProvider.getTCFData(from:)` is `ConsentDataProvider.collect(from:)`, returning `ConsentData` with `gdpr`, `gdprConsent` and, new, `gpp`, `gppSid`, `usPrivacy` (the `IABGPP_HDR_GppString`, `IABGPP_GppSID` and `IABUSPrivacy_String` keys). `gppSid` is read as the GPP in-app spec writes it (`2_7`), and also as `2,7` or a single number. `getTCFDataAsDict` is `collectAsDict`, with the three new keys. Follows the `*Provider.collect()` convention.
 
 * `AdAttributionKitIdsProvider.collect()` returns the `AdNetworkIdentifiers` array from the app's `Info.plist` (AdAttributionKit's counterpart of `SKAdNetworkItems`), empty when missing or malformed.

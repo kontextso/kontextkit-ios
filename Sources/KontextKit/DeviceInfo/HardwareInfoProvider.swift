@@ -5,7 +5,7 @@ public enum HardwareInfoProvider {
 
     /// The device's form factor, the OpenRTB-derived set. A consumer whose
     /// server uses other words (`handset`) maps it.
-    public enum HardwareType: String, Sendable {
+    public enum HardwareType: String, Codable, Sendable {
         case phone
         case tablet
         case tv

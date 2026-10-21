@@ -10,7 +10,7 @@ public enum OSInfoProvider {
 
     /// The operating system, as Apple names it. iPadOS is reported as
     /// such; a consumer whose server keeps a single `ios` maps it.
-    public enum OSName: String, Sendable {
+    public enum OSName: String, Codable, Sendable {
         case ios
         case ipados
         case tvos
