@@ -39,7 +39,7 @@ Sources/
     Privacy/                 TCFDataProvider, TrackingAuthorizationManager
     StoreKit/                SKAdNetworkManager, SKAdNetworkIdsProvider, SKAdNetworkParsing, SKOverlayManager, SKStoreProductManager
     UI/                      InAppBrowserManager, Scenes
-    Utilities/               BundleResources, Errors, JSONParsing, ValueCoercion
+    Utilities/               Errors, JSONParsing, UncheckedSendable, ValueCoercion
     PrivacyInfo.xcprivacy
   KontextKitOM/              product `KontextKitOM`, depends on KontextKit and the xcframework
                              OMManager, OMSession, OMPartner, OMCreativeType, BundleResources, omsdk-v1.js
