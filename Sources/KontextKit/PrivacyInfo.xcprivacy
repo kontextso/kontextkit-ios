@@ -27,8 +27,9 @@
       <array>
         <!-- CA92.1: read/write to user defaults that are accessed
              only by the app itself (or apps in a group containing
-             the app). TCFDataProvider reads IAB TCF consent strings
-             stored under standardized IABTCF_* keys. -->
+             the app). ConsentDataProvider reads the IAB consent strings
+             a CMP stores under the IABTCF_*, IABGPP_* and
+             IABUSPrivacy_String keys. -->
         <string>CA92.1</string>
       </array>
     </dict>

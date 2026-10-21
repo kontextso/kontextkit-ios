@@ -45,7 +45,7 @@ struct TrackingAuthorizationTests {
         let defaults = UserDefaults(suiteName: "com.kontext.test.tcf")!
         defaults.removePersistentDomain(forName: "com.kontext.test.tcf")
 
-        let data = TCFDataProvider.getTCFData(from: defaults)
+        let data = ConsentDataProvider.collect(from: defaults)
         #expect(data.gdprConsent == nil)
         #expect(data.gdpr == nil)
     }
@@ -57,7 +57,7 @@ struct TrackingAuthorizationTests {
         defaults.set("CONSENT_STRING_123", forKey: "IABTCF_TCString")
         defaults.set(1, forKey: "IABTCF_gdprApplies")
 
-        let data = TCFDataProvider.getTCFData(from: defaults)
+        let data = ConsentDataProvider.collect(from: defaults)
         #expect(data.gdprConsent == "CONSENT_STRING_123")
         #expect(data.gdpr == 1)
     }

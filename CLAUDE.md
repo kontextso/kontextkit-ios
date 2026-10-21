@@ -11,7 +11,7 @@ Distributed via Swift Package Manager and CocoaPods, as two products: `KontextKi
 Code belongs in KontextKit only if **one** of the following holds:
 
 1. **It touches Apple system APIs only callable from native code.** The JS/Dart layers in `sdk-react-native` and `sdk-flutter` can't reach these directly, so the native wrapper has to live somewhere.
-   Examples: `AdSupport` (IDFA), `AppTrackingTransparency` (ATT), device/screen/audio/network info, `StoreKit` (SKAdNetwork, SKOverlay, SKStoreProductViewController), TCF reads from `UserDefaults`, the IAB OMID native SDK.
+   Examples: `AdSupport` (IDFA), `AppTrackingTransparency` (ATT), device/screen/audio/network info, `StoreKit` (SKAdNetwork, SKOverlay, SKStoreProductViewController), IAB consent reads (TCF, GPP, US Privacy) from `UserDefaults`, the IAB OMID native SDK.
 
 2. **It has hidden complexity that's risky to re-derive across SDKs.** IAB OMID is the canonical example: correct `loaded`/`impression` event ordering, audio-session refcount, orphan-mount fix, IAB certification. Three SDKs writing this independently means three slightly-different implementations and three certification paths.
 
@@ -36,8 +36,8 @@ Why not `*Service`? Not iOS-idiomatic; Apple uses `*Manager` for the same shape 
 Sources/
   KontextKit/                product `KontextKit`
     DeviceInfo/              AdvertisingIdProvider, App/HW/OS/Screen/Battery/Audio/NetworkInfoProvider, BrightnessManager
-    Privacy/                 TCFDataProvider, TrackingAuthorizationManager
-    StoreKit/                SKAdNetworkManager, SKAdNetworkIdsProvider, SKAdNetworkParsing, SKOverlayManager, SKStoreProductManager
+    Privacy/                 ConsentDataProvider, TrackingAuthorizationManager
+    StoreKit/                SKAdNetworkManager, SKAdNetworkIdsProvider, AdAttributionKitIdsProvider, SKAdNetworkParsing, SKOverlayManager, SKStoreProductManager
     UI/                      InAppBrowserManager, Scenes
     Utilities/               Errors, JSONParsing, UncheckedSendable, ValueCoercion
     PrivacyInfo.xcprivacy
