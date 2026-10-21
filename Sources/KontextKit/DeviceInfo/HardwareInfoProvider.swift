@@ -3,11 +3,21 @@ import UIKit
 /// Provides hardware device information for ad targeting.
 public enum HardwareInfoProvider {
 
+    /// The device's form factor, the OpenRTB-derived set. A consumer whose
+    /// server uses other words (`handset`) maps it.
+    public enum HardwareType: String, Codable, Sendable {
+        case phone
+        case tablet
+        case tv
+        case desktop
+        case other
+    }
+
     /// Hardware information result.
     public struct HardwareInfo: Sendable {
         public let brand: String   // Always "Apple" on iOS
         public let model: String   // Device model identifier (e.g. "iPhone14,2")
-        public let type: String    // "handset", "tablet", or "other"
+        public let type: HardwareType
         /// Always `nil` on iOS. Apple's required-reason API rules for
         /// `NSPrivacyAccessedAPICategorySystemBootTime` (8FFB.1, 35F9.1)
         /// forbid sending boot time — or any value derived from it —
@@ -19,11 +29,13 @@ public enum HardwareInfoProvider {
     /// Collects hardware information.
     @MainActor
     public static func collect() -> HardwareInfo {
-        let type: String
+        let type: HardwareType
         switch UIDevice.current.userInterfaceIdiom {
-        case .phone: type = "handset"
-        case .pad: type = "tablet"
-        default: type = "other"   // .mac (Catalyst), .carPlay, .vision, .tv, .unspecified
+        case .phone: type = .phone
+        case .pad: type = .tablet
+        case .tv: type = .tv
+        case .mac: type = .desktop   // Catalyst
+        default: type = .other       // .carPlay, .vision, .unspecified
         }
 
         return HardwareInfo(
@@ -43,7 +55,7 @@ public enum HardwareInfoProvider {
         var dict: [String: Any] = [
             "brand": info.brand,
             "model": info.model,
-            "type": info.type,
+            "type": info.type.rawValue,
         ]
         if let bootTime = info.bootTime {
             dict["bootTime"] = bootTime

@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import Testing
+import UIKit
 @testable import KontextKit
 
 struct ProviderTests {
@@ -17,9 +18,12 @@ struct ProviderTests {
         #expect(!info.model.isEmpty)
     }
 
-    @Test @MainActor func hardwareInfoReturnsValidType() {
+    /// The simulator is an iPhone or an iPad; the type follows the idiom.
+    @Test @MainActor func hardwareInfoTypeFollowsTheIdiom() {
         let info = HardwareInfoProvider.collect()
-        #expect(["handset", "tablet", "other"].contains(info.type))
+        let expected: HardwareInfoProvider.HardwareType = UIDevice.current.userInterfaceIdiom == .pad ? .tablet : .phone
+        #expect(info.type == expected)
+        #expect(HardwareInfoProvider.collectAsDict()["type"] as? String == expected.rawValue)
     }
 
     /// `bootTime` must always be `nil` on iOS — Apple's required-reason API
@@ -177,11 +181,17 @@ struct ProviderTests {
 
     // MARK: - ScreenInfoProvider
 
-    @Test @MainActor func screenInfoReturnsDimensions() {
+    /// Points, the scale, and the panel: on a simulator the panel is `points * scale`
+    /// (no Plus-size downsampling), and it follows the interface orientation.
+    @Test @MainActor func screenInfoReturnsPointsScaleAndThePanel() {
         let info = ScreenInfoProvider.collect()
-        #expect(info.width > 0)
-        #expect(info.height > 0)
-        #expect(info.dpr > 0)
+        let bounds = UIScreen.main.bounds
+        #expect(info.width == Int(bounds.width))
+        #expect(info.height == Int(bounds.height))
+        #expect(info.dpr == Double(UIScreen.main.scale))
+        #expect(info.nativeWidth == Int(bounds.width * UIScreen.main.nativeScale))
+        #expect(info.nativeHeight == Int(bounds.height * UIScreen.main.nativeScale))
+        #expect((info.width > info.height) == (info.nativeWidth > info.nativeHeight))
     }
 
     @Test @MainActor func screenInfoReturnsValidOrientation() {
@@ -194,6 +204,8 @@ struct ProviderTests {
         #expect(dict["width"] != nil)
         #expect(dict["height"] != nil)
         #expect(dict["dpr"] != nil)
+        #expect(dict["nativeWidth"] != nil)
+        #expect(dict["nativeHeight"] != nil)
         #expect(dict["orientation"] != nil)
         #expect(dict["darkMode"] != nil)
     }
