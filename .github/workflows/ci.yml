@@ -29,7 +29,7 @@ jobs:
           # `generic/platform=iOS Simulator` doesn't require a concrete
           # simulator instance to exist — robust across Xcode/runner versions.
           xcodebuild clean build \
-            -scheme KontextKit \
+            -scheme KontextKit-Package \
             -destination 'generic/platform=iOS Simulator' \
             -skipPackagePluginValidation \
             > xcodebuild.log 2>&1 || (tail -100 xcodebuild.log; exit 1)
@@ -72,7 +72,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild test \
-            -scheme KontextKit \
+            -scheme KontextKit-Package \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}" \
             -skipPackagePluginValidation \
             -quiet

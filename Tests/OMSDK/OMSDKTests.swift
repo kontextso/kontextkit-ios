@@ -1,5 +1,5 @@
 import Testing
-@testable import KontextKit
+@testable import KontextKitOM
 
 struct OMSDKTests {
 

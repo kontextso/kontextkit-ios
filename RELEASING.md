@@ -99,7 +99,7 @@ First-time only: `pod trunk register support@kontext.so "Kontext"` and confirm v
 ## 8. Verify
 
 1. Check that the version is available on the [CocoaPods page](https://cocoapods.org/pods/KontextKit).
-2. Bump the consuming SDKs (sdk-swift, sdk-react-native, sdk-flutter) to the new KontextKit version and confirm they build.
+2. Bump the consuming SDKs (sdk-swift, sdk-react-native, sdk-flutter, sdk-swift-video) to the new KontextKit version and confirm they build. sdk-swift takes both products (`KontextKit` + `KontextKitOM`, pod `KontextKit/OMSDK`); sdk-swift-video takes `KontextKit` alone.
 
 ## Bundled OMID xcframework
 

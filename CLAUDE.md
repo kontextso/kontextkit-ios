@@ -4,7 +4,7 @@
 
 KontextKit is a **shared internal library**, not a public SDK. It's consumed by Kontext's iOS-targeting SDKs — `sdk-swift`, `sdk-react-native` (iOS half), and `sdk-flutter` (iOS half) — so that platform-utility code is written once and shared, not re-derived three times.
 
-Distributed via Swift Package Manager and CocoaPods.
+Distributed via Swift Package Manager and CocoaPods, as two products: `KontextKit` (the shared primitives) and `KontextKitOM` (IAB Open Measurement on top of it, with the bundled OMSDK xcframework; CocoaPods subspec `KontextKit/OMSDK`). An SDK that does not measure with OMID depends on `KontextKit` alone and never links the binary.
 
 ## Inclusion rule (high bar)
 
@@ -34,15 +34,17 @@ Why not `*Service`? Not iOS-idiomatic; Apple uses `*Manager` for the same shape 
 
 ```
 Sources/
-  DeviceInfo/        AdvertisingIdProvider, App/HW/OS/Screen/Battery/Audio/NetworkInfoProvider, BrightnessManager
-  Privacy/           TCFDataProvider, TrackingAuthorizationManager
-  StoreKit/          SKAdNetworkManager, SKAdNetworkIdsProvider, SKAdNetworkParsing, SKOverlayManager, SKStoreProductManager
-  UI/                InAppBrowserManager, Scenes
-  OMSDK/             OMManager, OMSession, OMPartner, OMCreativeType, omsdk-v1.js
-  Utilities/         BundleResources, Errors, JSONParsing, ValueCoercion
-  PrivacyInfo.xcprivacy
-Tests/               mirrors Sources/ layout
-Frameworks/          OMSDK_Kontextso.xcframework (binary, IAB-shipped)
+  KontextKit/                product `KontextKit`
+    DeviceInfo/              AdvertisingIdProvider, App/HW/OS/Screen/Battery/Audio/NetworkInfoProvider, BrightnessManager
+    Privacy/                 TCFDataProvider, TrackingAuthorizationManager
+    StoreKit/                SKAdNetworkManager, SKAdNetworkIdsProvider, SKAdNetworkParsing, SKOverlayManager, SKStoreProductManager
+    UI/                      InAppBrowserManager, Scenes
+    Utilities/               Errors, JSONParsing, UncheckedSendable, ValueCoercion
+    PrivacyInfo.xcprivacy
+  KontextKitOM/              product `KontextKitOM`, depends on KontextKit and the xcframework
+                             OMManager, OMSession, OMPartner, OMCreativeType, BundleResources, omsdk-v1.js
+Tests/               one test target for both products; mirrors the Sources/ layout
+Frameworks/          OMSDK_Kontextso.xcframework (binary, IAB-shipped), linked only into KontextKitOM
 ```
 
 ## Build / test / lint
@@ -51,10 +53,10 @@ Frameworks/          OMSDK_Kontextso.xcframework (binary, IAB-shipped)
 
 ```sh
 # Build
-xcodebuild -scheme KontextKit -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest,arch=arm64' build
+xcodebuild -scheme KontextKit-Package -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest,arch=arm64' build
 
 # Test
-xcodebuild -scheme KontextKit -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest,arch=arm64' test
+xcodebuild -scheme KontextKit-Package -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest,arch=arm64' test
 
 # Lint
 swiftlint lint

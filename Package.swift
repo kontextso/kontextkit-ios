@@ -7,21 +7,38 @@ let package = Package(
         .iOS(.v14)
     ],
     products: [
+        // The shared primitives: device info, privacy, StoreKit, UI. Every Kontext iOS SDK depends on it.
         .library(
             name: "KontextKit",
             targets: ["KontextKit"]
+        ),
+        // IAB Open Measurement (OMID) on top of it, with the bundled OMSDK xcframework. Only the SDKs that
+        // measure with OMID depend on it; the others never link the binary or take on its licence.
+        .library(
+            name: "KontextKitOM",
+            targets: ["KontextKitOM"]
         )
     ],
     targets: [
         .target(
             name: "KontextKit",
+            path: "Sources/KontextKit",
+            resources: [
+                .copy("PrivacyInfo.xcprivacy"),
+            ],
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency"),
+            ]
+        ),
+        .target(
+            name: "KontextKitOM",
             dependencies: [
+                "KontextKit",
                 "OMSDK_Kontextso",
             ],
-            path: "Sources",
+            path: "Sources/KontextKitOM",
             resources: [
-                .copy("OMSDK/omsdk-v1.js"),
-                .copy("PrivacyInfo.xcprivacy"),
+                .copy("omsdk-v1.js"),
             ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency"),
@@ -33,7 +50,7 @@ let package = Package(
         ),
         .testTarget(
             name: "KontextKitTests",
-            dependencies: ["KontextKit"],
+            dependencies: ["KontextKit", "KontextKitOM"],
             path: "Tests"
         )
     ]

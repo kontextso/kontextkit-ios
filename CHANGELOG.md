@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+### Breaking
+Open Measurement is its own product. SPM: depend on `KontextKitOM` as well as `KontextKit` and `import KontextKitOM` where `OMManager`, `OMSession`, `OMPartner` or `OMCreativeType` are used. CocoaPods: depend on `KontextKit/OMSDK` (the default subspec `KontextKit/Core` has no OM). Nothing else moved; `import KontextKit` still gives every provider and manager.
+
+* Split the package into two targets and products: `KontextKit` (`Sources/KontextKit/`: DeviceInfo, Privacy, StoreKit, UI, Utilities, the privacy manifest) and `KontextKitOM` (`Sources/KontextKitOM/`: the OMID wrappers and `omsdk-v1.js`, depending on `KontextKit` and the `OMSDK_Kontextso` binary target). An SDK that does not measure with OMID (sdk-swift-video) depends on `KontextKit` alone and no longer links the 2.3 MB xcframework or takes on the IAB OM licence. CocoaPods mirrors it with subspecs `Core` (default) and `OMSDK` (`vendored_frameworks`, `OMLICENSE`).
+* `KontextKitOM` reads `omsdk-v1.js` from its own resource bundle (`Bundle.module` under SPM, `KontextKitOM.bundle` under CocoaPods); the `Bundle.kontextKitResources` accessor moved with it, since nothing in `KontextKit` reads a resource.
+* CI builds and tests the `KontextKit-Package` scheme, which covers both products.
+
 ## 0.1.0
 ### Breaking
 `NetworkInfoProvider` no longer detects `network.type`. `NetworkInfo.type` is now `String?` (always nil), `NetworkInfo.detail` is removed, and `collectAsDict()` omits the `type`, `carrier`, and `detail` keys. Consumers that read these fields (sdk-swift, sdk-react-native, sdk-flutter) must update — only `userAgent` is still populated.

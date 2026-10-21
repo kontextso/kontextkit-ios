@@ -5,18 +5,18 @@ private final class BundleToken {}
 #endif
 
 extension Bundle {
-    /// Resource bundle accessor that works under both Swift Package
-    /// Manager and CocoaPods.
+    /// Resource bundle accessor for the `KontextKitOM` target that works
+    /// under both Swift Package Manager and CocoaPods.
     ///
-    /// SwiftPM auto-generates `Bundle.module` from the package's
-    /// `resources:` declaration. CocoaPods does not — so we look up
-    /// the `KontextKit.bundle` that the podspec's `resource_bundles`
-    /// produces, falling back to the framework's own bundle.
-    static let kontextKitResources: Bundle = {
+    /// SwiftPM auto-generates `Bundle.module` per target from its
+    /// `resources:` declaration. CocoaPods does not — so we look up the
+    /// `KontextKitOM.bundle` that the `KontextKit/OMSDK` subspec's
+    /// `resource_bundles` produces, falling back to the framework's own bundle.
+    static let kontextKitOMResources: Bundle = {
         #if SWIFT_PACKAGE
         return Bundle.module
         #else
-        let bundleName = "KontextKit"
+        let bundleName = "KontextKitOM"
         let candidates: [URL?] = [
             Bundle(for: BundleToken.self).resourceURL,
             Bundle.main.resourceURL,
