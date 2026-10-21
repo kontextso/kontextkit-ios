@@ -9,4 +9,9 @@ struct SKAdNetworkIdsProviderTests {
         let ids = SKAdNetworkIdsProvider.collect()
         #expect(ids.isEmpty)
     }
+
+    @Test func adAttributionKitIdsAreEmptyWithoutInfoPlistEntries() {
+        // No `AdNetworkIdentifiers` in the test bundle either.
+        #expect(AdAttributionKitIdsProvider.collect().isEmpty)
+    }
 }
