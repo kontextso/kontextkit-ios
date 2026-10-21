@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import Testing
+import UIKit
 @testable import KontextKit
 
 struct ProviderTests {
@@ -17,9 +18,12 @@ struct ProviderTests {
         #expect(!info.model.isEmpty)
     }
 
-    @Test @MainActor func hardwareInfoReturnsValidType() {
+    /// The simulator is an iPhone or an iPad; the type follows the idiom.
+    @Test @MainActor func hardwareInfoTypeFollowsTheIdiom() {
         let info = HardwareInfoProvider.collect()
-        #expect(["handset", "tablet", "other"].contains(info.type))
+        let expected: HardwareInfoProvider.HardwareType = UIDevice.current.userInterfaceIdiom == .pad ? .tablet : .phone
+        #expect(info.type == expected)
+        #expect(HardwareInfoProvider.collectAsDict()["type"] as? String == expected.rawValue)
     }
 
     /// `bootTime` must always be `nil` on iOS — Apple's required-reason API
