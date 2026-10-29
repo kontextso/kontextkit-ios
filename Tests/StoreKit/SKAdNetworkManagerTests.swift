@@ -2,6 +2,8 @@ import Foundation
 import Testing
 @testable import KontextKit
 
+// Serialized: every test drives the one shared manager, and some replace its StoreKit calls.
+@Suite(.serialized)
 @MainActor
 struct SKAdNetworkManagerTests {
 
@@ -154,5 +156,78 @@ struct SKAdNetworkManagerTests {
         #expect(SKAdNetworkManager.shared.skImpression?.sourceIdentifier == NSNumber(value: 1234))
 
         try await SKAdNetworkManager.shared.dispose()
+    }
+
+    // MARK: - What reaches StoreKit
+
+    private struct AppleError: Error {}
+
+    /// Replaces Apple's start and end with a spy for the length of `body`; the start fails when told.
+    private func withAppleSpy(startFails: Bool, _ body: (() -> [String]) async throws -> Void) async throws {
+        let savedStart = SKAdNetworkManager.appleStartImpression
+        let savedEnd = SKAdNetworkManager.appleEndImpression
+        defer {
+            SKAdNetworkManager.appleStartImpression = savedStart
+            SKAdNetworkManager.appleEndImpression = savedEnd
+        }
+        var calls: [String] = []
+        SKAdNetworkManager.appleStartImpression = { _, done in calls.append("start"); done(startFails ? AppleError() : nil) }
+        SKAdNetworkManager.appleEndImpression = { _, done in calls.append("end"); done(nil) }
+        try await SKAdNetworkManager.shared.dispose()
+        calls.removeAll()
+        try await body { calls }
+    }
+
+    @Test func aFailedStartStillReachesApplesEnd() async throws {
+        guard #available(iOS 14.5, *) else { return }
+        try await withAppleSpy(startFails: true) { calls in
+            try await SKAdNetworkManager.shared.initImpression(params: Self.validParams())
+            await #expect(throws: (any Error).self) { _ = try await SKAdNetworkManager.shared.startImpression() }
+            _ = try await SKAdNetworkManager.shared.endImpression()
+            try await SKAdNetworkManager.shared.dispose()
+            #expect(calls() == ["start", "end"], "Apple wants the end even after a failed start, once")
+        }
+    }
+
+    @Test func aFailedStartIsEndedByDispose() async throws {
+        guard #available(iOS 14.5, *) else { return }
+        try await withAppleSpy(startFails: true) { calls in
+            try await SKAdNetworkManager.shared.initImpression(params: Self.validParams())
+            _ = try? await SKAdNetworkManager.shared.startImpression()
+            try await SKAdNetworkManager.shared.dispose()
+            #expect(calls() == ["start", "end"])
+        }
+    }
+
+    @Test func aFailedStartIsEndedWhenTheNextImpressionReplacesIt() async throws {
+        guard #available(iOS 14.5, *) else { return }
+        try await withAppleSpy(startFails: true) { calls in
+            try await SKAdNetworkManager.shared.initImpression(params: Self.validParams())
+            _ = try? await SKAdNetworkManager.shared.startImpression()
+            try await SKAdNetworkManager.shared.initImpression(params: Self.validParams())
+            #expect(calls() == ["start", "end"])
+            try await SKAdNetworkManager.shared.dispose()
+        }
+    }
+
+    @Test func anImpressionNeverStartedNeverReachesApplesEnd() async throws {
+        guard #available(iOS 14.5, *) else { return }
+        try await withAppleSpy(startFails: false) { calls in
+            try await SKAdNetworkManager.shared.initImpression(params: Self.validParams())
+            _ = try await SKAdNetworkManager.shared.endImpression()
+            try await SKAdNetworkManager.shared.dispose()
+            #expect(calls().isEmpty, "an unmatched end stays unmatched")
+        }
+    }
+
+    @Test func aStartedImpressionIsEndedOnce() async throws {
+        guard #available(iOS 14.5, *) else { return }
+        try await withAppleSpy(startFails: false) { calls in
+            try await SKAdNetworkManager.shared.initImpression(params: Self.validParams())
+            _ = try await SKAdNetworkManager.shared.startImpression()
+            _ = try await SKAdNetworkManager.shared.endImpression()
+            try await SKAdNetworkManager.shared.dispose()
+            #expect(calls() == ["start", "end"])
+        }
     }
 }
