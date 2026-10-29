@@ -1,9 +1,5 @@
 # Changelog
 
-## Unreleased
-### Breaking
-* `AudioInfoProvider.collect()` (and `collectAsDict()`) no longer configures or activates the shared `AVAudioSession`. It used to set `.playback` with `.mixWithOthers`, activate the session and install a volume observer on its first call, which overwrote the audio setup of an app with its own player. A consumer that relied on that calls `AudioInfoProvider.ensureSessionActive()` before its first `collect()`; sdk-swift: one call where it reads audio; sdk-swift-video: none. `isSoundOn()` and the OMID video session still activate the session, as before.
-
 ## 0.3.0
 ### Breaking
 KontextKit reports facts as typed values; each SDK maps them to its own server's words.
