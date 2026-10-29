@@ -32,15 +32,13 @@ public enum AudioInfoProvider {
     /// permanently `true` and useless. Mirrors the Android implementation,
     /// which explicitly ignores `TYPE_BUILTIN_SPEAKER`.
     ///
-    /// `outputVolume` is documented as undefined unless the session is
-    /// active, AND iOS only continuously refreshes the property when
-    /// something is observing it via KVO (or audio is actively playing).
-    /// `ensureSessionActive()` handles both: it activates the session and
-    /// installs a permanent KVO observer that pins `outputVolume` live for
-    /// the app's lifetime, so the value tracks user volume changes between
-    /// `collect()` calls even when no video ad is on screen.
+    /// A read only: it never configures or activates the shared audio
+    /// session, which belongs to the app (a video app sets its own category
+    /// for its player). `outputVolume` is live while the app's session is
+    /// active or audio plays, a video app's normal state. A consumer with no
+    /// active session that wants a live value calls `ensureSessionActive()`
+    /// first, knowingly.
     public static func collect() -> AudioInfo {
-        ensureSessionActive()
         let session = AVAudioSession.sharedInstance()
         let volume = session.outputVolume
         let outputs = session.currentRoute.outputs
@@ -84,8 +82,9 @@ public enum AudioInfoProvider {
     /// - `isSoundOn()` — `outputVolume` is documented as undefined when
     ///   the session isn't active, so we need an active session to give
     ///   a reliable reading.
-    /// - `collect()` — same reason, plus the KVO observer below keeps
-    ///   the value live across preloads.
+    /// - A consumer that reads `collect()` with no audio session of its own
+    ///   and wants the value live: it calls this first. `collect()` never
+    ///   does, because the session is the app's.
     /// - OMID video sessions — IAB OMID requires that the SDK observe
     ///   device-volume changes via KVO on `outputVolume`, which only
     ///   fires when the session is active with `.mixWithOthers`
