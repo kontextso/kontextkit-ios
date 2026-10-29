@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+### Breaking
+* `AudioInfoProvider.collect()` (and `collectAsDict()`) no longer configures or activates the shared `AVAudioSession`. It used to set `.playback` with `.mixWithOthers`, activate the session and install a volume observer on its first call, which overwrote the audio setup of an app with its own player. A consumer that relied on that calls `AudioInfoProvider.ensureSessionActive()` before its first `collect()`; sdk-swift: one call where it reads audio; sdk-swift-video: none. `isSoundOn()` and the OMID video session still activate the session, as before.
+
+### Fixed
+* `SKAdNetworkManager` calls Apple's `endImpression` for an impression whose `startImpression` failed, as Apple requires: from `endImpression()`, from `dispose()`, and when `initImpression` replaces it. Before, a failed start reset the started flag and the end never reached StoreKit. An impression never started still sends no end.
+
 ## 0.3.0
 ### Breaking
 KontextKit reports facts as typed values; each SDK maps them to its own server's words.

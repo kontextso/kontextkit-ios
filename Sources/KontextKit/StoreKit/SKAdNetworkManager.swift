@@ -20,6 +20,27 @@ public final class SKAdNetworkManager {
     // gracefully return false on iOS < 14.5 instead of crashing).
     var skImpressionBox: Any?
     var isStarted: Bool = false
+    // A start was asked of Apple for the current impression and no end yet: Apple wants the end even when
+    // the start failed, so this, not `isStarted`, decides whether end and dispose reach Apple.
+    var needsEnd: Bool = false
+
+    // Apple's calls, replaceable so tests can see what reaches StoreKit. Typed on `AnyObject` because a
+    // stored property cannot carry the iOS 14.5 availability of `SKAdImpression`.
+    static var appleStartImpression: @MainActor (AnyObject, @escaping @Sendable (Error?) -> Void) -> Void = { impression, done in
+        if #available(iOS 14.5, *), let impression = impression as? SKAdImpression {
+            SKAdNetwork.startImpression(impression, completionHandler: done)
+        } else {
+            done(nil)
+        }
+    }
+
+    static var appleEndImpression: @MainActor (AnyObject, @escaping @Sendable (Error?) -> Void) -> Void = { impression, done in
+        if #available(iOS 14.5, *), let impression = impression as? SKAdImpression {
+            SKAdNetwork.endImpression(impression, completionHandler: done)
+        } else {
+            done(nil)
+        }
+    }
 
     private init() {}
 
@@ -100,8 +121,9 @@ public final class SKAdNetworkManager {
             }
         }
 
-        let previousImpression = isStarted ? skImpression : nil
+        let previousImpression = needsEnd ? skImpression : nil
         isStarted = false
+        needsEnd = false
         skImpression = imp
 
         // End any previous impression after the new one is safely
@@ -111,7 +133,7 @@ public final class SKAdNetworkManager {
         // genuinely succeeded). The OS retries SKAN postbacks
         // internally, so the missed end-signal isn't catastrophic.
         if let old = previousImpression {
-            SKAdNetwork.endImpression(old) { _ in
+            Self.appleEndImpression(old) { _ in
                 Task { @MainActor in completion(true, nil) }
             }
         } else {
@@ -138,7 +160,8 @@ public final class SKAdNetworkManager {
         }
 
         isStarted = true
-        SKAdNetwork.startImpression(impression) { [weak self] error in
+        needsEnd = true
+        Self.appleStartImpression(impression) { [weak self] error in
             Task { @MainActor in
                 guard let self else { return }
                 if let error {
@@ -146,7 +169,7 @@ public final class SKAdNetworkManager {
                     // impression. If init replaced it between the call
                     // and this callback, the new impression has its own
                     // lifecycle and shouldn't inherit the failed start's
-                    // rollback.
+                    // rollback. `needsEnd` stays: Apple still wants the end.
                     if self.skImpression === impression {
                         self.isStarted = false
                     }
@@ -173,14 +196,16 @@ public final class SKAdNetworkManager {
             ))
             return
         }
-        guard isStarted else {
-            // Not started — ignore unmatched endImpression.
+        guard needsEnd else {
+            // No start was asked — ignore unmatched endImpression.
             completion(true, nil)
             return
         }
 
+        let wasStarted = isStarted
         isStarted = false
-        SKAdNetwork.endImpression(impression) { [weak self] error in
+        needsEnd = false
+        Self.appleEndImpression(impression) { [weak self] error in
             Task { @MainActor in
                 guard let self else { return }
                 if let error {
@@ -190,7 +215,8 @@ public final class SKAdNetworkManager {
                     // lifecycle and shouldn't inherit the failed end's
                     // rollback (which would falsely mark NEW as started).
                     if self.skImpression === impression {
-                        self.isStarted = true
+                        self.isStarted = wasStarted
+                        self.needsEnd = true
                     }
                     completion(false, Errors.make(
                         domain: "SKAN_END_IMPRESSION_FAILED",
@@ -204,10 +230,11 @@ public final class SKAdNetworkManager {
     }
 
     public func dispose(completion: @escaping @Sendable (Bool, NSError?) -> Void) {
-        if #available(iOS 14.5, *), isStarted, let impression = skImpression {
+        if #available(iOS 14.5, *), needsEnd, let impression = skImpression {
             isStarted = false
+            needsEnd = false
             skImpressionBox = nil
-            SKAdNetwork.endImpression(impression) { error in
+            Self.appleEndImpression(impression) { error in
                 Task { @MainActor in
                     if let error {
                         completion(false, Errors.make(
@@ -221,6 +248,7 @@ public final class SKAdNetworkManager {
             }
         } else {
             isStarted = false
+            needsEnd = false
             skImpressionBox = nil
             completion(true, nil)
         }
