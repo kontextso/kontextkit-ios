@@ -1,9 +1,5 @@
 # Changelog
 
-## Unreleased
-### Fixed
-* `SKAdNetworkManager` calls Apple's `endImpression` for an impression whose `startImpression` failed, as Apple requires: from `endImpression()`, from `dispose()`, and when `initImpression` replaces it. Before, a failed start reset the started flag and the end never reached StoreKit. An impression never started still sends no end.
-
 ## 0.3.0
 ### Breaking
 KontextKit reports facts as typed values; each SDK maps them to its own server's words.
