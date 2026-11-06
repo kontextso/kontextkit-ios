@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+### Added
+* `SKAdNetworkManager.createImpression(params:)` returns an `SKAdImpressionSession`: one ad's own `SKAdImpression` with `start()` and `end()` (completion and async forms). Any number can be alive at once, so a chat ad and a video ad on screen together no longer replace or end each other's impression. Each session applies its calls one at a time in the order made: an `end()` made while the `start()` is still waiting for StoreKit reaches Apple after it. Ending is final; a `start()` after `end()` returns `false` and sends nothing. Same keys and error domains as `initImpression`; `SKAN_INIT_UNAVAILABLE` below iOS 14.5.
+
+### Changed
+* `initImpression` / `startImpression` / `endImpression` / `dispose` keep their signatures and still drive the shared manager's one impression, now an `SKAdImpressionSession`: the end of a replaced or disposed impression waits for its in-flight start. A `startImpression()` after `endImpression()` on the same impression returns `false` instead of starting it again.
+
+### Fixed
+* `SKStoreProductManager.present` gives up after 5 seconds when the product never loads, with `LOAD_TIMEOUT`, so the caller can open the click URL instead of waiting forever. A load that completes later is dropped: no sheet appears.
+* `SKOverlayManager` present and dismiss complete with `LOAD_TIMEOUT` / `DISMISS_TIMEOUT` after 5 seconds without StoreKit's delegate callback, instead of staying pending and answering every later call `OPERATION_IN_PROGRESS`. An overlay that appears after its present timed out is dismissed, and a late callback of such an overlay no longer completes the next present.
+
 ## 0.4.0
 ### Breaking
 * `AudioInfoProvider.collect()` (and `collectAsDict()`) no longer configures or activates the shared `AVAudioSession`. It used to set `.playback` with `.mixWithOthers`, activate the session and install a volume observer on its first call, which overwrote the audio setup of an app with its own player. A consumer that relied on that calls `AudioInfoProvider.ensureSessionActive()` before its first `collect()`; sdk-swift: one call where it reads audio; sdk-swift-video: none. `isSoundOn()` and the OMID video session still activate the session, as before.
