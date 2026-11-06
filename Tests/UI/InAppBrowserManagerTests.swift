@@ -65,6 +65,7 @@ struct InAppBrowserManagerTests {
 @MainActor
 struct InAppBrowserManagerLifecycleTests {
     private let url = URL(string: "https://example.com")!
+    typealias Reason = InAppBrowserManager.CloseReason
 
     /// A fake UIKit: `presented` is what UIKit holds, `onScreen` what it shows.
     /// The presenter sits in a real window, so the manager's presenter checks pass.
@@ -77,25 +78,30 @@ struct InAppBrowserManagerLifecycleTests {
         var presented: [UIViewController] = []
         var onScreen: Set<ObjectIdentifier> = []
         var dismissed: [(UIViewController, Bool)] = []
-        var reasons: [InAppBrowserManager.CloseReason] = []
-        /// A dismissal takes the browser off screen at once; false leaves it animating.
+        var reasons: [Reason] = []
+        /// A dismissal ends at once; false holds it until `finishDismissals()`.
         var dismissCompletes = true
-        /// The top-most view controller; the presenter when nil.
-        var top: UIViewController?
-        var transitions: [@MainActor @Sendable () -> Void] = []
+        var pendingDismissals: [@MainActor @Sendable () -> Void] = []
+        var selfDismissals: [@MainActor @Sendable () -> Void] = []
+        var deadlines: [(Double, @MainActor @Sendable () -> Void)] = []
         lazy var manager = InAppBrowserManager(
             notificationCenter: center,
-            topViewController: { [unowned self] in top ?? presenter },
+            topViewController: { [unowned self] in presenter },
             presentController: { [unowned self] browser, _ in
                 presented.append(browser)
                 onScreen.insert(ObjectIdentifier(browser))
             },
-            dismissController: { [unowned self] browser, animated in
+            dismissController: { [unowned self] browser, animated, completion in
                 dismissed.append((browser, animated))
-                if dismissCompletes { leave(browser) }
+                let end: @MainActor @Sendable () -> Void = { [unowned self] in
+                    leave(browser)
+                    completion()
+                }
+                if dismissCompletes { end() } else { pendingDismissals.append(end) }
             },
             presentingController: { [unowned self] vc in isShown(vc) ? presenter : nil },
-            afterTransition: { [unowned self] _, then in transitions.append(then) },
+            afterSelfDismissal: { [unowned self] _, then in selfDismissals.append(then) },
+            after: { [unowned self] seconds, work in deadlines.append((seconds, work)) },
             sceneOf: { [unowned self] vc in vc === presenter ? presenterScene : nil }
         )
 
@@ -108,12 +114,33 @@ struct InAppBrowserManagerLifecycleTests {
             manager.present(url: URL(string: "https://example.com")!) { [unowned self] in reasons.append($0) }
         }
 
+        var browser: SFSafariViewController { presented.last as! SFSafariViewController }
+
         /// Safari calls its delegate, then dismisses itself; `leaves: false` stops
-        /// before the dismissal has finished.
+        /// before that dismissal has ended.
         func tapDone(leaves: Bool = true) {
-            let browser = presented.last as! SFSafariViewController
+            let browser = browser
             manager.safariViewControllerDidFinish(browser)
-            if leaves { leave(browser) }
+            if leaves { finishSelfDismissal(of: browser) }
+        }
+
+        func finishSelfDismissal(of browser: UIViewController) {
+            leave(browser)
+            let pending = selfDismissals
+            selfDismissals = []
+            pending.forEach { $0() }
+        }
+
+        func finishDismissals() {
+            let pending = pendingDismissals
+            pendingDismissals = []
+            pending.forEach { $0() }
+        }
+
+        func fireDeadlines() {
+            let pending = deadlines
+            deadlines = []
+            pending.forEach { $0.1() }
         }
 
         func isShown(_ vc: UIViewController) -> Bool {
@@ -124,98 +151,178 @@ struct InAppBrowserManagerLifecycleTests {
             onScreen.remove(ObjectIdentifier(vc))
         }
 
-        func finishTransitions() {
-            let pending = transitions
-            transitions = []
-            pending.forEach { $0() }
-        }
-
         func post(_ name: Notification.Name, scene: AnyObject? = nil) {
             center.post(name: name, object: scene)
         }
     }
 
-    @Test func doneFiresOnceWithDone() {
+    // MARK: - onClose runs once the browser is off screen
+
+    @Test func doneRunsTheHandlerOnceSafariHasGone() {
         let h = Harness()
         #expect(h.present())
-        h.tapDone()
-        h.tapDone()
+        let a = h.browser
+        h.tapDone(leaves: false)
+        #expect(h.reasons.isEmpty, "Safari is still leaving")
+        #expect(!h.manager.isPresented)
+        #expect(h.manager.presentedController === a, "still recognisable while it leaves")
+        h.finishSelfDismissal(of: a)
         #expect(h.reasons == [.done])
         #expect(h.dismissed.isEmpty, "Safari dismisses itself on Done")
     }
 
-    @Test func dismissFiresOnceWithDismissed() {
+    @Test func dismissRunsTheHandlerWhenTheDismissalEnds() {
+        let h = Harness()
+        h.dismissCompletes = false
+        #expect(h.present())
+        #expect(h.manager.dismiss())
+        #expect(h.reasons.isEmpty)
+        #expect(!h.manager.isPresented)
+        h.finishDismissals()
+        #expect(h.reasons == [.dismissed])
+        #expect(h.dismissed.count == 1 && h.dismissed.first?.1 == true)
+    }
+
+    @Test func returnAfterBackgroundRunsReturnedToAppWhenTheDismissalEnds() {
+        let h = Harness()
+        h.dismissCompletes = false
+        #expect(h.present())
+        h.post(UIScene.didEnterBackgroundNotification)
+        h.post(UIScene.didActivateNotification)
+        #expect(h.reasons.isEmpty)
+        #expect(!h.manager.isPresented)
+        h.finishDismissals()
+        #expect(h.reasons == [.returnedToApp])
+        h.post(UIScene.didEnterBackgroundNotification)
+        h.post(UIScene.didActivateNotification)
+        #expect(h.reasons == [.returnedToApp])
+    }
+
+    @Test func presentFromTheDoneHandlerJustWorks() {
+        let h = Harness()
+        var next: Bool?
+        var nextReasons: [Reason] = []
+        #expect(h.manager.present(url: url, onClose: { _ in
+            next = h.manager.present(url: url, onClose: { nextReasons.append($0) })
+        }))
+        h.tapDone()
+        #expect(next == true)
+        #expect(h.presented.count == 2)
+        #expect(h.manager.isPresented)
+        #expect(h.manager.dismiss())
+        #expect(nextReasons == [.dismissed])
+    }
+
+    // MARK: - The deadline
+
+    @Test func deadlineRunsTheHandlerOnceWhenUIKitNeverReports() {
+        let h = Harness()
+        h.dismissCompletes = false
+        #expect(h.present())
+        #expect(h.manager.dismiss())
+        #expect(h.deadlines.map(\.0) == [InAppBrowserManager.closeDeadline])
+        h.fireDeadlines()
+        #expect(h.reasons == [.dismissed])
+        h.finishDismissals()
+        #expect(h.reasons == [.dismissed], "a late completion does nothing")
+    }
+
+    @Test func deadlineAfterTheDismissalEndedDoesNothing() {
         let h = Harness()
         #expect(h.present())
+        h.tapDone()
+        #expect(h.reasons == [.done])
+        h.fireDeadlines()
+        #expect(h.reasons == [.done])
+    }
+
+    @Test func doneDeadlineKeepsTheReason() {
+        let h = Harness()
+        #expect(h.present())
+        let a = h.browser
+        h.tapDone(leaves: false)
+        h.fireDeadlines()
+        #expect(h.reasons == [.done])
+        h.finishSelfDismissal(of: a)
+        #expect(h.reasons == [.done])
+    }
+
+    @Test func noHandlerNoDeadline() {
+        let h = Harness()
+        #expect(h.manager.present(url: url))
+        #expect(h.manager.dismiss())
+        #expect(h.deadlines.isEmpty)
+    }
+
+    // MARK: - Unsupported cases: false or nothing, never a crash
+
+    @Test func unsupportedCasesReturnFalseOrDoNothing() {
+        let h = Harness()
+        // dismiss() with nothing open, twice.
+        #expect(!h.manager.dismiss())
+        #expect(!h.manager.dismiss())
+
+        // A detached presenter; a present while a browser is open.
+        #expect(!h.manager.present(url: url, from: UIViewController(), onClose: { _ in }))
+        #expect(h.present())
+        #expect(!h.manager.present(url: url, from: UIViewController(), onClose: { _ in }))
+        #expect(!h.manager.present(url: url, onClose: { _ in }))
+        #expect(!h.manager.present(url: url))
+        #expect(h.presented.count == 1)
+        #expect(h.manager.isPresented)
+        #expect(h.reasons.isEmpty)
+        #expect(h.dismissed.isEmpty)
+
+        // dismiss() twice: the second does nothing.
         #expect(h.manager.dismiss())
         #expect(!h.manager.dismiss())
         #expect(h.reasons == [.dismissed])
         #expect(h.dismissed.count == 1)
-        #expect(h.dismissed.first?.0 === h.presented.first)
-        #expect(h.dismissed.first?.1 == true)
-    }
 
-    @Test func dismissAfterDoneDoesNothing() {
-        let h = Harness()
+        // dismiss() after Done does nothing.
         #expect(h.present())
-        h.tapDone()
+        let b = h.browser
+        h.tapDone(leaves: false)
         #expect(!h.manager.dismiss())
-        #expect(h.reasons == [.done])
-        #expect(h.dismissed.isEmpty)
-    }
+        h.tapDone(leaves: false)
 
-    @Test func newPresentReplacesAndFiresReplaced() {
-        let h = Harness()
-        var second: [InAppBrowserManager.CloseReason] = []
-        #expect(h.present())
-        #expect(h.manager.present(url: url, onClose: { second.append($0) }))
-        #expect(h.reasons == [.replaced])
-        #expect(second.isEmpty)
-        #expect(h.dismissed.count == 1)
-        #expect(h.dismissed.first?.0 === h.presented.first)
-        #expect(h.dismissed.first?.1 == false)
-        #expect(h.manager.presentedController === h.presented.last)
-        #expect(h.manager.isPresented)
+        // A present while the closed browser is still leaving.
+        #expect(!h.manager.present(url: url, onClose: { _ in }))
+        #expect(h.presented.count == 2)
+        h.finishSelfDismissal(of: b)
+        #expect(h.reasons == [.dismissed, .done])
+        #expect(h.dismissed.count == 1, "UIKit is never asked to dismiss a browser that is gone")
+
+        // A handler that calls present and dismiss.
+        var inner: [Reason] = []
+        #expect(h.manager.present(url: url, onClose: { _ in
+            _ = h.manager.present(url: self.url, onClose: { inner.append($0) })
+            _ = h.manager.dismiss()
+            _ = h.manager.dismiss()
+        }))
         h.tapDone()
-        #expect(second == [.done])
-        #expect(h.reasons == [.replaced])
-    }
-
-    @Test func returnAfterBackgroundFiresReturnedToApp() {
-        let h = Harness()
-        #expect(h.present())
-        h.post(UIScene.willDeactivateNotification)
-        h.post(UIScene.didEnterBackgroundNotification)
-        h.post(UIScene.willEnterForegroundNotification)
-        h.post(UIScene.didActivateNotification)
-        #expect(h.reasons == [.returnedToApp])
+        #expect(inner == [.dismissed])
         #expect(!h.manager.isPresented)
-        #expect(h.dismissed.count == 1)
-        h.post(UIScene.didEnterBackgroundNotification)
-        h.post(UIScene.didActivateNotification)
-        #expect(h.reasons == [.returnedToApp])
+        h.fireDeadlines()
+        #expect(inner == [.dismissed])
+        #expect(h.reasons == [.dismissed, .done])
     }
 
-    @Test func inactiveActiveBounceKeepsBrowserOpen() {
+    @Test func goneBrowsersHandlerPresentingItsOwnWins() {
         let h = Harness()
-        #expect(h.present())
-        h.post(UIScene.willDeactivateNotification)
-        h.post(UIScene.didActivateNotification)
-        #expect(h.reasons.isEmpty)
-        #expect(h.manager.isPresented)
-        #expect(h.dismissed.isEmpty)
+        var own: [Reason] = []
+        #expect(h.manager.present(url: url, onClose: { _ in
+            _ = h.manager.present(url: self.url, onClose: { own.append($0) })
+        }))
+        h.leave(h.browser)  // the app dismissed its stack without telling
+        #expect(!h.manager.present(url: url, onClose: { _ in Issue.record("never installed") }))
+        #expect(h.presented.count == 2, "the first browser and the handler's")
+        #expect(h.manager.presentedController === h.presented.last)
+        #expect(h.manager.dismiss())
+        #expect(own == [.dismissed])
     }
 
-    @Test func backgroundBeforePresentDoesNotCount() {
-        let h = Harness()
-        #expect(h.present())
-        h.tapDone()
-        h.post(UIScene.didEnterBackgroundNotification)
-        #expect(h.present())
-        h.post(UIScene.didActivateNotification)
-        #expect(h.manager.isPresented)
-        #expect(h.reasons == [.done])
-    }
+    // MARK: - State and the auto-dismiss
 
     @Test func stateTracksThePresentedBrowser() {
         let h = Harness()
@@ -242,15 +349,66 @@ struct InAppBrowserManagerLifecycleTests {
         #expect(h.dismissed.isEmpty)
     }
 
-    @Test func presentWithoutCallbackStillWorks() {
+    @Test func retainedBrowserDismissedWithoutNoticeIsNotPresented() {
+        let h = Harness()
+        #expect(h.present())
+        let kept = h.manager.presentedController
+        h.leave(kept!)  // the app dismissed its whole stack; the controller lives on
+        #expect(h.manager.presentedController === kept)
+        #expect(!h.manager.isPresented)
+        #expect(!h.manager.dismiss())
+        #expect(h.reasons == [.dismissed])
+        #expect(h.dismissed.isEmpty)
+    }
+
+    @Test func inactiveActiveBounceKeepsTheBrowserOpen() {
+        let h = Harness()
+        #expect(h.present())
+        h.post(UIScene.willDeactivateNotification)
+        h.post(UIScene.didActivateNotification)
+        #expect(h.reasons.isEmpty)
+        #expect(h.manager.isPresented)
+    }
+
+    @Test func backgroundBeforePresentDoesNotCount() {
+        let h = Harness()
+        #expect(h.present())
+        h.tapDone()
+        h.post(UIScene.didEnterBackgroundNotification)
+        #expect(h.present())
+        h.post(UIScene.didActivateNotification)
+        #expect(h.manager.isPresented)
+        #expect(h.reasons == [.done])
+    }
+
+    @Test func anotherScenesBackgroundDoesNotArmTheAutoDismiss() {
+        let h = Harness()
+        let other = NSObject()
+        #expect(h.present())
+        h.post(UIScene.didEnterBackgroundNotification, scene: other)
+        h.post(UIScene.didActivateNotification, scene: h.presenterScene)
+        #expect(h.manager.isPresented)
+        h.post(UIScene.didEnterBackgroundNotification, scene: h.presenterScene)
+        h.post(UIScene.didActivateNotification, scene: other)
+        #expect(h.manager.isPresented, "another scene's activation is not the return")
+        h.post(UIScene.didActivateNotification, scene: h.presenterScene)
+        #expect(h.reasons == [.returnedToApp])
+    }
+
+    // MARK: - The old API
+
+    @Test func presentWithoutHandlerStillWorks() {
         let h = Harness()
         #expect(h.manager.present(url: url))
         #expect(h.manager.isPresented)
+        #expect(!h.manager.present(url: url), "one browser at a time")
+        #expect(h.presented.count == 1)
         h.post(UIScene.didEnterBackgroundNotification)
         h.post(UIScene.didActivateNotification)
         #expect(!h.manager.isPresented)
         #expect(h.manager.present(url: url))
         #expect(h.manager.dismiss())
+        #expect(!h.manager.present(url: URL(string: "ftp://example.com")!))
     }
 
     @Test func rejectedURLLeavesTheOpenBrowserAlone() {
@@ -260,196 +418,10 @@ struct InAppBrowserManagerLifecycleTests {
         #expect(h.manager.isPresented)
         #expect(h.reasons.isEmpty)
     }
-
-    @Test func presentsOverTheGivenPresenter() {
-        var presenters: [UIViewController] = []
-        var held: [UIViewController] = []
-        let manager = InAppBrowserManager(
-            notificationCenter: NotificationCenter(),
-            topViewController: { nil },
-            presentController: { browser, presenter in presenters.append(presenter); held.append(browser) },
-            dismissController: { _, _ in },
-            presentingController: { vc in held.contains { $0 === vc } ? presenters.last : nil }
-        )
-        #expect(!manager.present(url: url, onClose: nil), "no top view controller")
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
-        let own = UIViewController()
-        window.rootViewController = own
-        window.isHidden = false
-        #expect(manager.present(url: url, from: own, onClose: nil))
-        #expect(presenters.count == 1 && presenters.first === own)
-        #expect(held.count == 1)
-    }
-
-    // MARK: - Re-entrant handlers
-
-    @Test func replacedHandlerPresentingAgainWinsOverTheOuterPresent() {
-        let h = Harness()
-        var aReasons: [InAppBrowserManager.CloseReason] = []
-        var bReasons: [InAppBrowserManager.CloseReason] = []
-        var cReasons: [InAppBrowserManager.CloseReason] = []
-        var cPresented = false
-        #expect(h.manager.present(url: url, onClose: { reason in
-            aReasons.append(reason)
-            cPresented = h.manager.present(url: url, onClose: { cReasons.append($0) })
-        }))
-        let a = h.presented.first
-        #expect(!h.manager.present(url: url, onClose: { bReasons.append($0) }), "superseded by the handler's present")
-        #expect(cPresented)
-        #expect(aReasons == [.replaced])
-        #expect(h.presented.count == 2, "A and C; B never reaches UIKit")
-        #expect(h.presented.first === a)
-        let c = h.presented.last
-        #expect(h.manager.presentedController === c)
-        #expect(h.manager.isPresented)
-        h.tapDone()
-        #expect(cReasons == [.done])
-        #expect(aReasons == [.replaced])
-        #expect(bReasons.isEmpty)
-        #expect(!h.manager.dismiss())
-        #expect(cReasons == [.done])
-    }
-
-    @Test func handlerCallingDismissDoesNotStopTheNewBrowser() {
-        let h = Harness()
-        var aReasons: [InAppBrowserManager.CloseReason] = []
-        var dismissedInHandler: Bool?
-        #expect(h.manager.present(url: url, onClose: { reason in
-            aReasons.append(reason)
-            dismissedInHandler = h.manager.dismiss()
-        }))
-        #expect(h.present())
-        #expect(aReasons == [.replaced])
-        #expect(dismissedInHandler == false, "nothing is open while the old handler runs")
-        #expect(h.manager.isPresented)
-        #expect(h.manager.presentedController === h.presented.last)
-        #expect(h.manager.dismiss())
-        #expect(h.reasons == [.dismissed])
-        #expect(aReasons == [.replaced])
-    }
-
-    @Test func handlerPresentingThenDismissingLeavesNothingOpen() {
-        let h = Harness()
-        var cReasons: [InAppBrowserManager.CloseReason] = []
-        #expect(h.manager.present(url: url, onClose: { _ in
-            _ = h.manager.present(url: url, onClose: { cReasons.append($0) })
-            _ = h.manager.dismiss()
-        }))
-        #expect(!h.present())
-        #expect(cReasons == [.dismissed])
-        #expect(h.reasons.isEmpty, "the outer browser was never installed")
-        #expect(!h.manager.isPresented)
-    }
-
-    // MARK: - Presenting while the previous browser leaves
-
-    @Test func presentFromDoneHandlerWaitsForTheBrowserToLeave() {
-        let h = Harness()
-        var cReasons: [InAppBrowserManager.CloseReason] = []
-        var cPresented = false
-        #expect(h.manager.present(url: url, onClose: { _ in
-            cPresented = h.manager.present(url: url, onClose: { cReasons.append($0) })
-        }))
-        let a = h.presented.first!
-        h.top = a  // the closing browser is still the top-most controller
-        h.tapDone(leaves: false)
-        #expect(cPresented)
-        #expect(h.presented.count == 1, "not presented over, or next to, the closing browser")
-        #expect(h.manager.isPresented)
-        #expect(h.manager.presentedController !== a)
-        h.finishTransitions()
-        #expect(h.presented.count == 1, "still leaving: waits for the next transition")
-        #expect(h.transitions.count == 1)
-        h.leave(a)
-        h.top = nil
-        h.finishTransitions()
-        #expect(h.presented.count == 2)
-        #expect(h.manager.presentedController === h.presented.last)
-        #expect(h.manager.isPresented)
-        #expect(h.manager.dismiss())
-        #expect(cReasons == [.dismissed])
-    }
-
-    @Test func presentFromDismissHandlerWaitsForTheDismissalAnimation() {
-        let h = Harness()
-        h.dismissCompletes = false
-        var cReasons: [InAppBrowserManager.CloseReason] = []
-        #expect(h.manager.present(url: url, onClose: { _ in
-            _ = h.manager.present(url: url, onClose: { cReasons.append($0) })
-        }))
-        let a = h.presented.first!
-        #expect(h.manager.dismiss())
-        #expect(h.presented.count == 1)
-        #expect(h.manager.isPresented)
-        #expect(h.manager.presentedController !== a)
-        h.leave(a)
-        h.finishTransitions()
-        #expect(h.presented.count == 2)
-        h.tapDone()
-        #expect(cReasons == [.done])
-    }
-
-    @Test func dismissWhileWaitingCancelsTheWaitingBrowser() {
-        let h = Harness()
-        var cReasons: [InAppBrowserManager.CloseReason] = []
-        #expect(h.manager.present(url: url, onClose: { _ in
-            _ = h.manager.present(url: url, onClose: { cReasons.append($0) })
-        }))
-        let a = h.presented.first!
-        h.tapDone(leaves: false)
-        #expect(h.manager.dismiss())
-        #expect(cReasons == [.dismissed])
-        h.leave(a)
-        h.finishTransitions()
-        #expect(h.presented.count == 1, "never shown")
-        #expect(h.dismissed.isEmpty, "nothing on screen to dismiss")
-    }
-
-    // MARK: - Presented state
-
-    @Test func retainedBrowserDismissedWithoutNoticeIsNotPresented() {
-        let h = Harness()
-        #expect(h.present())
-        let kept = h.manager.presentedController
-        h.leave(kept!)  // the app dismissed its whole stack; the controller lives on
-        #expect(h.manager.presentedController === kept)
-        #expect(!h.manager.isPresented)
-        #expect(h.present())
-        #expect(h.reasons == [.dismissed], "not .replaced")
-        #expect(h.dismissed.isEmpty)
-    }
-
-    @Test func dismissOfARetainedSilentlyDismissedBrowserReturnsFalse() {
-        let h = Harness()
-        #expect(h.present())
-        let kept = h.manager.presentedController
-        h.leave(kept!)
-        #expect(!h.manager.dismiss())
-        #expect(h.reasons == [.dismissed])
-        #expect(h.dismissed.isEmpty)
-    }
-
-    // MARK: - Scenes
-
-    @Test func anotherScenesBackgroundDoesNotArmTheAutoDismiss() {
-        let h = Harness()
-        let other = NSObject()
-        #expect(h.present())
-        h.post(UIScene.didEnterBackgroundNotification, scene: other)
-        h.post(UIScene.didActivateNotification, scene: h.presenterScene)
-        #expect(h.manager.isPresented)
-        #expect(h.reasons.isEmpty)
-        h.post(UIScene.didEnterBackgroundNotification, scene: h.presenterScene)
-        h.post(UIScene.didActivateNotification, scene: other)
-        #expect(h.manager.isPresented, "another scene's activation is not the return")
-        h.post(UIScene.didActivateNotification, scene: h.presenterScene)
-        #expect(h.reasons == [.returnedToApp])
-    }
 }
 
-/// The manager on real UIKit presentations in a test window. The test bundle has
-/// no app, so UIKit attaches (or refuses) a presentation at once but never
-/// finishes a transition: a presented controller stays on screen for the test.
+/// The manager on real UIKit presentations in a test window, with UIKit's own
+/// present and dismiss.
 @MainActor
 struct InAppBrowserManagerUIKitTests {
     private let url = URL(string: "https://example.com")!
@@ -458,11 +430,9 @@ struct InAppBrowserManagerUIKitTests {
     private final class Stage {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
         let root = UIViewController()
-        var transitions: [@MainActor @Sendable () -> Void] = []
         lazy var manager = InAppBrowserManager(
             notificationCenter: NotificationCenter(),
-            topViewController: { [unowned self] in Scenes.topViewController(base: root) },
-            afterTransition: { [unowned self] _, then in transitions.append(then) }
+            topViewController: { [unowned self] in Scenes.topViewController(base: root) }
         )
 
         init() {
@@ -480,20 +450,25 @@ struct InAppBrowserManagerUIKitTests {
         #expect(s.manager.isPresented)
     }
 
+    @Test func presentsOverTheGivenPresenter() {
+        let s = Stage()
+        let other = Stage()
+        #expect(s.manager.present(url: url, from: other.root, onClose: nil))
+        #expect(s.manager.presentedController?.presentingViewController === other.root)
+        #expect(s.root.presentedViewController == nil)
+    }
+
     @Test func detachedPresenterFailsAndLeavesTheOpenBrowserAlone() {
         let s = Stage()
         var reasons: [InAppBrowserManager.CloseReason] = []
-        var rejected: [InAppBrowserManager.CloseReason] = []
+        #expect(!s.manager.present(url: url, from: UIViewController(), onClose: { _ in }))
         #expect(s.manager.present(url: url, onClose: { reasons.append($0) }))
         let open = s.manager.presentedController
-        #expect(!s.manager.present(url: url, from: UIViewController(), onClose: { rejected.append($0) }))
+        #expect(!s.manager.present(url: url, from: UIViewController(), onClose: { _ in }))
         #expect(s.manager.presentedController === open)
         #expect(open?.presentingViewController === s.root)
         #expect(s.manager.isPresented)
         #expect(reasons.isEmpty)
-        #expect(s.manager.dismiss())
-        #expect(reasons == [.dismissed])
-        #expect(rejected.isEmpty)
     }
 
     @Test func busyPresenterFailsAndLeavesTheOpenBrowserAlone() {
@@ -512,35 +487,15 @@ struct InAppBrowserManagerUIKitTests {
         #expect(other.root.presentedViewController === sheet)
     }
 
-    @Test func presentFromDoneHandlerSkipsTheClosingBrowser() {
+    @Test func presentWhileABrowserIsOpenFailsAndLeavesItAlone() {
         let s = Stage()
-        var next: Bool?
-        #expect(s.manager.present(url: url, onClose: { _ in
-            next = s.manager.present(url: URL(string: "https://example.org")!, onClose: nil)
-        }))
-        let closing = s.manager.presentedController as! SFSafariViewController
-        #expect(Scenes.topViewController(base: s.root) === closing)
-        s.manager.safariViewControllerDidFinish(closing)
-        #expect(next == true)
-        #expect(closing.presentedViewController == nil, "not presented over the closing browser")
-        #expect(s.root.presentedViewController === closing, "nor pushed at its busy presenter")
-        #expect(s.manager.presentedController !== closing)
-        #expect(s.manager.isPresented)
-        #expect(s.transitions.count == 1, "waits for the closing browser to leave")
-    }
-
-    @Test func explicitPresenterThatIsTheClosingBrowserIsSkipped() {
-        let s = Stage()
-        var next: Bool?
-        var closing: UIViewController?
-        #expect(s.manager.present(url: url, onClose: { _ in
-            next = s.manager.present(url: URL(string: "https://example.org")!, from: closing, onClose: nil)
-        }))
-        closing = s.manager.presentedController
-        #expect(s.manager.dismiss())
-        #expect(next == true)
-        #expect(closing?.presentedViewController == nil)
-        #expect(s.manager.presentedController !== closing)
-        #expect(s.transitions.count == 1)
+        var reasons: [InAppBrowserManager.CloseReason] = []
+        #expect(s.manager.present(url: url, onClose: { reasons.append($0) }))
+        let open = s.manager.presentedController
+        #expect(!s.manager.present(url: URL(string: "https://example.org")!, onClose: { _ in }))
+        #expect(!s.manager.present(url: url, from: s.root, onClose: { _ in }))
+        #expect(s.manager.presentedController === open)
+        #expect(s.root.presentedViewController === open)
+        #expect(reasons.isEmpty)
     }
 }
