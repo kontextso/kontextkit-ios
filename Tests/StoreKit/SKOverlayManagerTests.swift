@@ -3,6 +3,8 @@ import StoreKit
 import Testing
 @testable import KontextKit
 
+// Serialized: tests drive the one shared manager's pending state.
+@Suite(.serialized)
 @MainActor
 struct SKOverlayManagerTests {
 
@@ -119,6 +121,7 @@ struct SKOverlayManagerTests {
         let config = SKOverlay.AppConfiguration(appIdentifier: "1", position: .bottom)
         let overlay = SKOverlay(configuration: config)
 
+        manager._overlay = overlay
         let captured: (Bool, NSError?) = await withCheckedContinuation { (cont: CheckedContinuation<(Bool, NSError?), Never>) in
             manager.pendingPresentCompletion = { success, error in cont.resume(returning: (success, error)) }
             let loadError = NSError(domain: "test", code: 0)
@@ -127,5 +130,38 @@ struct SKOverlayManagerTests {
         #expect(!captured.0)
         #expect(captured.1?.domain == "LOAD_FAILED")
         #expect(manager.pendingPresentCompletion == nil)
+        #expect(manager._overlay == nil)
+    }
+
+    @Test func aFailureOfAnOverlayNoLongerTrackedIsIgnored() {
+        guard #available(iOS 16.0, *) else { return }
+        let manager = SKOverlayManager.shared
+        let stale = SKOverlay(configuration: SKOverlay.AppConfiguration(appIdentifier: "1", position: .bottom))
+        var completed = false
+        manager._overlay = nil
+        manager.pendingPresentCompletion = { _, _ in completed = true }
+        defer { manager.pendingPresentCompletion = nil }
+
+        manager.storeOverlayDidFailToLoad(stale, error: NSError(domain: "test", code: 0))
+
+        #expect(!completed, "a timed-out overlay's late failure must not complete the next present")
+        #expect(manager.pendingPresentCompletion != nil)
+    }
+
+    // MARK: - Callback timeout
+
+    @Test func aPresentWhoseCallbackNeverComesTimesOut() async {
+        let manager = SKOverlayManager.shared
+        let saved = SKOverlayManager.callbackTimeout
+        SKOverlayManager.callbackTimeout = 0.05
+        defer { SKOverlayManager.callbackTimeout = saved }
+
+        let captured: (Bool, NSError?) = await withCheckedContinuation { (cont: CheckedContinuation<(Bool, NSError?), Never>) in
+            manager.awaitPresentation { success, error in cont.resume(returning: (success, error)) }
+        }
+
+        #expect(!captured.0)
+        #expect(captured.1?.domain == "LOAD_TIMEOUT")
+        #expect(manager.pendingPresentCompletion == nil, "the manager is free for the next present")
     }
 }

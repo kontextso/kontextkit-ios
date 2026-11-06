@@ -12,12 +12,19 @@ public final class SKOverlayManager: NSObject {
     // SKOverlay is iOS 16+; an `SKOverlay?` stored property would force
     // the whole class to require iOS 16, but our deployment target is
     // iOS 14. Storing as `AnyObject?` sidesteps that constraint.
-    private var _overlay: AnyObject?
+    // Internal so tests can track an overlay without presenting it.
+    var _overlay: AnyObject?
 
     // `internal` (default) so test target can observe state transitions
     // via `@testable import`; not part of the public surface.
     var pendingPresentCompletion: ((Bool, NSError?) -> Void)?
     var pendingDismissCompletion: ((Bool, NSError?) -> Void)?
+
+    /// How long a present or dismiss waits for StoreKit's delegate callback before it completes with
+    /// `LOAD_TIMEOUT` / `DISMISS_TIMEOUT`. Without it a callback that never comes would leave the
+    /// operation pending and every later one `OPERATION_IN_PROGRESS`. Same as the product sheet's.
+    static var callbackTimeout: TimeInterval = 5
+    private var watchdog: Task<Void, Never>?
 
     private override init() {}
 
@@ -97,6 +104,11 @@ public final class SKOverlayManager: NSObject {
         }
 
         pendingDismissCompletion = completion
+        armWatchdog { [weak self] in
+            guard let self else { return }
+            self.overlay = nil
+            self.completeDismiss(false, Errors.make(domain: "DISMISS_TIMEOUT", message: "SKOverlay did not report its dismissal"))
+        }
         SKOverlay.dismiss(in: scene)
     }
 
@@ -180,8 +192,48 @@ public final class SKOverlayManager: NSObject {
         overlay.delegate = self
 
         self.overlay = overlay
-        self.pendingPresentCompletion = completion
+        awaitPresentation(completion: completion)
         overlay.present(in: scene)
+    }
+
+    /// Waits for the delegate to report the overlay presented or failed; on timeout, completes with
+    /// `LOAD_TIMEOUT` and retracts the overlay, so it does not appear after the caller has moved on.
+    func awaitPresentation(completion: @escaping @Sendable (Bool, NSError?) -> Void) {
+        pendingPresentCompletion = completion
+        armWatchdog { [weak self] in
+            guard let self else { return }
+            self._overlay = nil
+            if #available(iOS 16.0, *), let scene = Scenes.activeScene() {
+                SKOverlay.dismiss(in: scene)
+            }
+            self.completePresent(false, Errors.make(domain: "LOAD_TIMEOUT", message: "SKOverlay did not load within \(Self.callbackTimeout) seconds"))
+        }
+    }
+
+    private func armWatchdog(_ onTimeout: @escaping @MainActor () -> Void) {
+        watchdog?.cancel()
+        let timeout = Self.callbackTimeout
+        watchdog = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            onTimeout()
+        }
+    }
+
+    fileprivate func completePresent(_ success: Bool, _ error: NSError?) {
+        watchdog?.cancel()
+        watchdog = nil
+        let completion = pendingPresentCompletion
+        pendingPresentCompletion = nil
+        completion?(success, error)
+    }
+
+    fileprivate func completeDismiss(_ success: Bool, _ error: NSError?) {
+        watchdog?.cancel()
+        watchdog = nil
+        let completion = pendingDismissCompletion
+        pendingDismissCompletion = nil
+        completion?(success, error)
     }
 
     @available(iOS 16.0, *)
@@ -226,13 +278,11 @@ extension SKOverlayManager: @preconcurrency SKOverlayDelegate {
     // Apple delivers SKOverlayDelegate callbacks on the main thread;
     // `@preconcurrency` lets the @MainActor-isolated method bodies
     // satisfy the nonisolated protocol requirement.
+    // A callback for an overlay no longer tracked belongs to one that timed out: its caller has moved on.
     public func storeOverlayDidFailToLoad(_ overlay: SKOverlay, error: Error) {
-        if let tracked = self.overlay, tracked === overlay {
-            self.overlay = nil
-        }
-        let completion = pendingPresentCompletion
-        pendingPresentCompletion = nil
-        completion?(false, Errors.make(
+        guard let tracked = self.overlay, tracked === overlay else { return }
+        self.overlay = nil
+        completePresent(false, Errors.make(
             domain: "LOAD_FAILED",
             message: "Failed to load SKOverlay",
             details: error.localizedDescription
@@ -240,17 +290,20 @@ extension SKOverlayManager: @preconcurrency SKOverlayDelegate {
     }
 
     public func storeOverlayDidFinishPresentation(_ overlay: SKOverlay, transitionContext: SKOverlay.TransitionContext) {
-        let completion = pendingPresentCompletion
-        pendingPresentCompletion = nil
-        completion?(true, nil)
+        guard let tracked = self.overlay, tracked === overlay else {
+            // Appeared after its present timed out: take it down, unless a newer overlay replaced it.
+            if self.overlay == nil, let scene = Scenes.activeScene() {
+                SKOverlay.dismiss(in: scene)
+            }
+            return
+        }
+        completePresent(true, nil)
     }
 
     public func storeOverlayDidFinishDismissal(_ overlay: SKOverlay, transitionContext: SKOverlay.TransitionContext) {
         if let tracked = self.overlay, tracked === overlay {
             self.overlay = nil
         }
-        let completion = pendingDismissCompletion
-        pendingDismissCompletion = nil
-        completion?(true, nil)
+        completeDismiss(true, nil)
     }
 }

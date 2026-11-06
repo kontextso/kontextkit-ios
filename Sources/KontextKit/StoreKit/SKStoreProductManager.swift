@@ -10,6 +10,20 @@ public final class SKStoreProductManager: NSObject, @preconcurrency SKStoreProdu
     var pendingPresentCompletion: ((Bool, NSError?) -> Void)?
     var pendingDismissCompletion: ((Bool) -> Void)?
 
+    /// How long `present` waits for the product to load before it gives up with `LOAD_TIMEOUT`. The
+    /// viewer has just tapped and sees nothing until the sheet appears; past this, the caller is better
+    /// served opening the ad's click URL. A late load is then dropped: no sheet appears afterwards.
+    static var loadTimeout: TimeInterval = 5
+    // StoreKit's load, replaceable so tests can hold or drop it.
+    typealias LoadProduct = @MainActor (SKStoreProductViewController, [String: Any], @escaping @Sendable (Bool, Error?) -> Void) -> Void
+    static var loadProduct: LoadProduct = { viewController, params, done in
+        viewController.loadProduct(withParameters: params, completionBlock: done)
+    }
+    /// The present waiting for its product to load; a load callback for any other is stale.
+    private var loadingAttempt: Int?
+    private var attemptCount = 0
+    private var loadWatchdog: Task<Void, Never>?
+
     private override init() {}
 
     // MARK: - Public API
@@ -77,9 +91,24 @@ public final class SKStoreProductManager: NSObject, @preconcurrency SKStoreProdu
         }
 
         pendingPresentCompletion = completion
+        attemptCount += 1
+        let attempt = attemptCount
+        loadingAttempt = attempt
+        loadWatchdog?.cancel()
+        let timeout = Self.loadTimeout
+        loadWatchdog = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            guard !Task.isCancelled, let self, self.loadingAttempt == attempt else { return }
+            self.loadingAttempt = nil
+            self.completePresent(false, Errors.make(
+                domain: "LOAD_TIMEOUT",
+                message: "The App Store product did not load within \(timeout) seconds"
+            ))
+        }
+
         let viewController = SKStoreProductViewController()
         viewController.delegate = self
-        viewController.loadProduct(withParameters: params) { [weak self] loaded, error in
+        Self.loadProduct(viewController, params) { [weak self] loaded, error in
             // loadProduct's completion runs on an unspecified queue.
             // Hop to MainActor explicitly before touching VC presentation
             // and our @MainActor state.
@@ -88,6 +117,11 @@ public final class SKStoreProductManager: NSObject, @preconcurrency SKStoreProdu
                     completion(false, Errors.make(domain: "MANAGER_DEALLOCATED", message: "Manager was deallocated"))
                     return
                 }
+                // Timed out already: the caller has moved on, so the sheet must not appear now.
+                guard self.loadingAttempt == attempt else { return }
+                self.loadingAttempt = nil
+                self.loadWatchdog?.cancel()
+                self.loadWatchdog = nil
                 guard loaded else {
                     let errorMessage = error?.localizedDescription ?? "Failed to load product"
                     self.completePresent(false, Errors.make(domain: "LOAD_FAILED", message: errorMessage))
@@ -141,7 +175,9 @@ public final class SKStoreProductManager: NSObject, @preconcurrency SKStoreProdu
 
     /// Presents the App Store product page. Returns `true` when a
     /// view controller was actually presented. Throws on validation or
-    /// load errors (missing/invalid `itunesItem`, network failure, etc).
+    /// load errors (missing/invalid `itunesItem`, network failure, etc),
+    /// and with `LOAD_TIMEOUT` when the product did not load within
+    /// `loadTimeout`; no sheet appears after that.
     public func present(skan: [String: Any]) async throws -> Bool {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Bool, Error>) in
             present(skan: skan) { success, error in

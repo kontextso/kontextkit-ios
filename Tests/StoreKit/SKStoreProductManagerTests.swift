@@ -3,6 +3,8 @@ import Testing
 import StoreKit
 @testable import KontextKit
 
+// Serialized: tests drive the one shared manager's pending state, and some replace its StoreKit load.
+@Suite(.serialized)
 @MainActor
 struct SKStoreProductManagerTests {
 
@@ -34,6 +36,48 @@ struct SKStoreProductManagerTests {
         manager.dismiss { dismissed.value = $0 }
 
         #expect(dismissed.value == false)
+    }
+
+    // MARK: - Load timeout
+
+    private struct LoadError: Error {}
+
+    @Test func aLoadThatNeverCallsBackTimesOutAndNothingIsPresentedLater() async {
+        let manager = SKStoreProductManager.shared
+        let savedTimeout = SKStoreProductManager.loadTimeout
+        let savedLoad = SKStoreProductManager.loadProduct
+        defer {
+            SKStoreProductManager.loadTimeout = savedTimeout
+            SKStoreProductManager.loadProduct = savedLoad
+        }
+        var loads: [@Sendable (Bool, Error?) -> Void] = []
+        SKStoreProductManager.loadProduct = { _, _, done in loads.append(done) }
+        SKStoreProductManager.loadTimeout = 0.05
+
+        let first: (Bool, NSError?) = await withCheckedContinuation { continuation in
+            manager.present(skan: ["itunesItem": "987654321"]) { continuation.resume(returning: ($0, $1)) }
+        }
+        #expect(!first.0)
+        #expect(first.1?.domain == "LOAD_TIMEOUT")
+        #expect(manager.pendingPresentCompletion == nil)
+
+        // The next present is accepted, and the first one's late load neither presents nor resolves it.
+        SKStoreProductManager.loadTimeout = 30
+        let second = TestBox<(Bool, NSError?)>()
+        manager.present(skan: ["itunesItem": "987654321"]) { second.value = ($0, $1) }
+        #expect(loads.count == 2)
+        loads[0](true, nil)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(second.value == nil, "a timed-out load must not act on the next present")
+        #expect(manager.pendingPresentCompletion != nil)
+
+        loads[1](false, LoadError())
+        for _ in 0..<100 where second.value == nil {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(second.value?.0 == false)
+        #expect(second.value?.1?.domain == "LOAD_FAILED")
+        #expect(manager.pendingPresentCompletion == nil)
     }
 
     // MARK: - applySkanParams
