@@ -4,25 +4,23 @@ import Foundation
 // from MainActor — `@preconcurrency` tells the compiler to trust that.
 @preconcurrency import StoreKit
 
+/// SKAdNetwork view-through impressions.
+///
+/// `createImpression(params:)` returns one `SKAdImpressionSession` per ad, each with its own
+/// `SKAdImpression`, so several ads (from one SDK or several) can be measured at once.
+///
+/// `initImpression` / `startImpression` / `endImpression` / `dispose` drive a single impression held by
+/// the shared manager: every caller of them shares that one slot, and a second ad's `initImpression`
+/// ends the first one's. They are kept for existing callers and run on an `SKAdImpressionSession`.
 @MainActor
 public final class SKAdNetworkManager {
     public static let shared = SKAdNetworkManager()
 
+    /// The impression the single-slot methods drive.
+    var current: SKAdImpressionSession?
+
     @available(iOS 14.5, *)
-    var skImpression: SKAdImpression? {
-        get { skImpressionBox as? SKAdImpression }
-        set { skImpressionBox = newValue }
-    }
-    // SKAdImpression is iOS 14.5+; storing as `Any?` sidesteps the
-    // deploying-target-vs-stored-property-availability rule (a stored
-    // `SKAdImpression?` would force the whole class to require iOS 14.5,
-    // but the class needs to remain accessible on iOS 14.0 — methods
-    // gracefully return false on iOS < 14.5 instead of crashing).
-    var skImpressionBox: Any?
-    var isStarted: Bool = false
-    // A start was asked of Apple for the current impression and no end yet: Apple wants the end even when
-    // the start failed, so this, not `isStarted`, decides whether end and dispose reach Apple.
-    var needsEnd: Bool = false
+    var skImpression: SKAdImpression? { current?.skImpression }
 
     // Apple's calls, replaceable so tests can see what reaches StoreKit. Typed on `AnyObject` because a
     // stored property cannot carry the iOS 14.5 availability of `SKAdImpression`.
@@ -46,6 +44,18 @@ public final class SKAdNetworkManager {
 
     // MARK: - Public API
 
+    /// A new impression for one ad, independent of every other. Throws `MISSING_ARGUMENTS` when a
+    /// required key is missing, `SKAN_INIT_UNAVAILABLE` below iOS 14.5. Keys: see `initImpression`.
+    public func createImpression(params: [String: Any]) throws -> SKAdImpressionSession {
+        guard let impression = try SKAdImpressionSession.makeImpression(params: params) else {
+            throw Self.unavailableError()
+        }
+        return SKAdImpressionSession(impression: impression)
+    }
+
+    /// Replaces the shared manager's one impression; the previous one is ended (if it was started) before
+    /// the completion runs. Prefer `createImpression(params:)`, which gives each ad its own.
+    ///
     /// Required keys:
     ///  - version: String
     ///  - network: String              (adNetworkIdentifier)
@@ -63,79 +73,25 @@ public final class SKAdNetworkManager {
     ///  - sourceIdentifier: String/Int (SKAdNetwork 4.0, iOS 16.1+)
     ///  - fidelities: Array            (fidelity-0 entry fills missing top-level nonce/timestamp/signature)
     public func initImpression(params: [String: Any], completion: @escaping @Sendable (Bool, NSError?) -> Void) {
-        guard #available(iOS 14.5, *) else {
+        let impression: AnyObject?
+        do {
+            impression = try SKAdImpressionSession.makeImpression(params: params)
+        } catch {
+            completion(false, error as NSError)
+            return
+        }
+        guard let impression else {
             completion(false, nil)
             return
         }
 
-        // Required top-level fields.
-        let version = ValueCoercion.string(params["version"])
-        let networkId = ValueCoercion.string(params["network"])
-        let itunesItem = ValueCoercion.int(params["itunesItem"])
+        let previous = current
+        current = SKAdImpressionSession(impression: impression)
 
-        // Resolve attribution: prefer top-level, fall back to fidelity-0.
-        let f0 = SKAdNetworkParsing.fidelity0Values(from: params)
-        let nonce = ValueCoercion.string(params["nonce"]) ?? f0?.nonce
-        let timestampInt = ValueCoercion.int(params["timestamp"]) ?? f0.flatMap { Int($0.timestamp) }
-        let signature = ValueCoercion.string(params["signature"]) ?? f0?.signature
-
-        var missing: [String] = []
-        if version == nil { missing.append("version") }
-        if networkId == nil { missing.append("network") }
-        if itunesItem == nil { missing.append("itunesItem") }
-        if nonce == nil { missing.append("nonce") }
-        if timestampInt == nil { missing.append("timestamp") }
-        if signature == nil { missing.append("signature") }
-
-        guard
-            missing.isEmpty,
-            let version, let networkId, let itunesItem,
-            let nonce, let timestampInt, let signature
-        else {
-            completion(false, Errors.make(
-                domain: "MISSING_ARGUMENTS",
-                message: "Missing required arguments: \(missing.joined(separator: ", "))"
-            ))
-            return
-        }
-
-        // Optional with defaults.
-        let sourceApp = ValueCoercion.int(params["sourceApp"]) ?? 0
-        let campaign = ValueCoercion.int(params["campaign"]) ?? 0
-
-        // Property-based init covers iOS 14.5+; the iOS 16.0 memberwise
-        // init is just sugar — using one path keeps the code uniform.
-        let imp = SKAdImpression()
-        imp.version = version
-        imp.adNetworkIdentifier = networkId
-        imp.advertisedAppStoreItemIdentifier = NSNumber(value: itunesItem)
-        imp.sourceAppStoreItemIdentifier = NSNumber(value: sourceApp)
-        imp.adCampaignIdentifier = NSNumber(value: campaign)
-        imp.adImpressionIdentifier = nonce
-        imp.timestamp = NSNumber(value: timestampInt)
-        imp.signature = signature
-
-        if #available(iOS 16.1, *) {
-            if let sourceIdentifier = SKAdNetworkParsing.sourceIdentifier(from: params) {
-                imp.sourceIdentifier = NSNumber(value: sourceIdentifier)
-            }
-        }
-
-        let previousImpression = needsEnd ? skImpression : nil
-        isStarted = false
-        needsEnd = false
-        skImpression = imp
-
-        // End any previous impression after the new one is safely
-        // stored. We await the system's completion so the caller knows
-        // the previous impression is fully ended before they proceed.
-        // Best-effort: a failure here doesn't propagate (the new init
-        // genuinely succeeded). The OS retries SKAN postbacks
-        // internally, so the missed end-signal isn't catastrophic.
-        if let old = previousImpression {
-            Self.appleEndImpression(old) { _ in
-                Task { @MainActor in completion(true, nil) }
-            }
+        // Best-effort: a failed end of the previous one doesn't fail this init. The OS retries SKAN
+        // postbacks internally, so the missed end-signal isn't catastrophic.
+        if let previous {
+            previous.end { _, _ in completion(true, nil) }
         } else {
             completion(true, nil)
         }
@@ -146,42 +102,11 @@ public final class SKAdNetworkManager {
             completion(false, nil)
             return
         }
-        guard let impression = skImpression else {
-            completion(false, Errors.make(
-                domain: "NO_IMPRESSION",
-                message: "SKAdImpression not initialized. Call initImpression first."
-            ))
+        guard let current else {
+            completion(false, Self.noImpressionError())
             return
         }
-        guard !isStarted else {
-            // Already started — ignore duplicate call.
-            completion(true, nil)
-            return
-        }
-
-        isStarted = true
-        needsEnd = true
-        Self.appleStartImpression(impression) { [weak self] error in
-            Task { @MainActor in
-                guard let self else { return }
-                if let error {
-                    // Only roll back if our state still references THIS
-                    // impression. If init replaced it between the call
-                    // and this callback, the new impression has its own
-                    // lifecycle and shouldn't inherit the failed start's
-                    // rollback. `needsEnd` stays: Apple still wants the end.
-                    if self.skImpression === impression {
-                        self.isStarted = false
-                    }
-                    completion(false, Errors.make(
-                        domain: "SKAN_START_IMPRESSION_FAILED",
-                        message: "Failed to start SKAdImpression: \(error)"
-                    ))
-                } else {
-                    completion(true, nil)
-                }
-            }
-        }
+        current.start(completion: completion)
     }
 
     public func endImpression(completion: @escaping @Sendable (Bool, NSError?) -> Void) {
@@ -189,74 +114,29 @@ public final class SKAdNetworkManager {
             completion(false, nil)
             return
         }
-        guard let impression = skImpression else {
-            completion(false, Errors.make(
-                domain: "NO_IMPRESSION",
-                message: "SKAdImpression not initialized. Call initImpression first."
-            ))
+        guard let current else {
+            completion(false, Self.noImpressionError())
             return
         }
-        guard needsEnd else {
-            // No start was asked — ignore unmatched endImpression.
-            completion(true, nil)
-            return
-        }
-
-        let wasStarted = isStarted
-        isStarted = false
-        needsEnd = false
-        Self.appleEndImpression(impression) { [weak self] error in
-            Task { @MainActor in
-                guard let self else { return }
-                if let error {
-                    // Only roll back if our state still references THIS
-                    // impression. If init replaced it between the call
-                    // and this callback, the new impression has its own
-                    // lifecycle and shouldn't inherit the failed end's
-                    // rollback (which would falsely mark NEW as started).
-                    if self.skImpression === impression {
-                        self.isStarted = wasStarted
-                        self.needsEnd = true
-                    }
-                    completion(false, Errors.make(
-                        domain: "SKAN_END_IMPRESSION_FAILED",
-                        message: "Failed to end SKAdImpression: \(error)"
-                    ))
-                } else {
-                    completion(true, nil)
-                }
-            }
-        }
+        current.end(completion: completion)
     }
 
     public func dispose(completion: @escaping @Sendable (Bool, NSError?) -> Void) {
-        if #available(iOS 14.5, *), needsEnd, let impression = skImpression {
-            isStarted = false
-            needsEnd = false
-            skImpressionBox = nil
-            Self.appleEndImpression(impression) { error in
-                Task { @MainActor in
-                    if let error {
-                        completion(false, Errors.make(
-                            domain: "SKAN_DISPOSE_END_IMPRESSION_FAILED",
-                            message: "Failed to end SKAdImpression during dispose: \(error)"
-                        ))
-                    } else {
-                        completion(true, nil)
-                    }
-                }
-            }
-        } else {
-            isStarted = false
-            needsEnd = false
-            skImpressionBox = nil
+        guard let disposed = current else {
             completion(true, nil)
+            return
         }
+        current = nil
+        disposed.end(
+            failureDomain: "SKAN_DISPOSE_END_IMPRESSION_FAILED",
+            failureMessage: "Failed to end SKAdImpression during dispose",
+            completion: completion
+        )
     }
 
-    /// Initializes the SKAdImpression. Throws on validation failure or
-    /// system error. Returns normally on success or when running on iOS
-    /// older than 14.5 (where the API isn't available).
+    /// Initializes the SKAdImpression. Throws on validation failure, and
+    /// with `SKAN_INIT_UNAVAILABLE` on iOS older than 14.5 (where the API
+    /// isn't available).
     public func initImpression(params: [String: Any]) async throws {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             initImpression(params: params) { success, error in
@@ -265,10 +145,7 @@ public final class SKAdNetworkManager {
                 } else if success {
                     cont.resume()
                 } else {
-                    cont.resume(throwing: Errors.make(
-                        domain: "SKAN_INIT_UNAVAILABLE",
-                        message: "SKAdImpression is unavailable on this iOS version"
-                    ))
+                    cont.resume(throwing: Self.unavailableError())
                 }
             }
         }
@@ -315,5 +192,15 @@ public final class SKAdNetworkManager {
                 }
             }
         }
+    }
+
+    // MARK: - Helpers
+
+    private nonisolated static func unavailableError() -> NSError {
+        Errors.make(domain: "SKAN_INIT_UNAVAILABLE", message: "SKAdImpression is unavailable on this iOS version")
+    }
+
+    private static func noImpressionError() -> NSError {
+        Errors.make(domain: "NO_IMPRESSION", message: "SKAdImpression not initialized. Call initImpression first.")
     }
 }

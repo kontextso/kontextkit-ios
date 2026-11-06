@@ -2,7 +2,8 @@ import Foundation
 import Testing
 @testable import KontextKit
 
-// Serialized: every test drives the one shared manager, and some replace its StoreKit calls.
+// Serialized: every test drives the one shared manager, and some replace its StoreKit calls. The
+// SKAdImpressionSession tests extend this suite (SKAdImpressionSessionTests.swift), since they replace the same calls.
 @Suite(.serialized)
 @MainActor
 struct SKAdNetworkManagerTests {
@@ -53,11 +54,11 @@ struct SKAdNetworkManagerTests {
 
     // MARK: - initImpression happy paths
     //
-    // These tests inspect skImpressionBox after initImpression to verify
+    // These tests inspect skImpression after initImpression to verify
     // attribution fields were stored correctly. Cleanup: each test calls
     // dispose first to ensure a clean starting state.
 
-    private static func validParams() -> [String: Any] {
+    static func validParams() -> [String: Any] {
         [
             "version": "2.2",
             "network": "abc.skadnetwork",
@@ -160,7 +161,7 @@ struct SKAdNetworkManagerTests {
 
     // MARK: - What reaches StoreKit
 
-    private struct AppleError: Error {}
+    struct AppleError: Error {}
 
     /// Replaces Apple's start and end with a spy for the length of `body`; the start fails when told.
     private func withAppleSpy(startFails: Bool, _ body: (() -> [String]) async throws -> Void) async throws {

@@ -37,7 +37,7 @@ Sources/
   KontextKit/                product `KontextKit`
     DeviceInfo/              AdvertisingIdProvider, App/HW/OS/Screen/Battery/Audio/NetworkInfoProvider, BrightnessManager
     Privacy/                 ConsentDataProvider, TrackingAuthorizationManager
-    StoreKit/                SKAdNetworkManager, SKAdNetworkIdsProvider, AdAttributionKitIdsProvider, SKAdNetworkParsing, SKOverlayManager, SKStoreProductManager
+    StoreKit/                SKAdNetworkManager, SKAdImpressionSession, SKAdNetworkIdsProvider, AdAttributionKitIdsProvider, SKAdNetworkParsing, SKOverlayManager, SKStoreProductManager
     UI/                      InAppBrowserManager, Scenes
     Utilities/               Errors, JSONParsing, UncheckedSendable, ValueCoercion
     PrivacyInfo.xcprivacy
