@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+### Added
+* `InAppBrowserManager.present(url:from:onClose:)`: presents over a given view controller (the top-most one when nil) and calls `onClose` once when that browser goes away, with a `CloseReason`: `.done` (the user tapped "Done"), `.dismissed` (`dismiss()`, or UIKit took the browser away without telling, reported at the next `present`/`dismiss()`), `.replaced` (a new `present`) or `.returnedToApp` (the auto-dismiss). `present(url:)` and `openFromURLString(_:)` are unchanged and pass no handler.
+* `InAppBrowserManager.isPresented` (a browser is open) and `presentedController` (weak; the browser presented last, kept while its dismissal animates, so a caller can recognise it on screen).
+
+### Changed
+* The auto-dismiss closes the browser only when the user comes back to the app after it entered the background (a deep link or App Store redirect sent them to another app), as its doc comment always said. It used to close on every `UIScene.didActivateNotification`, so pulling down Notification Center or Control Center over the browser, or a system alert, closed it too. Consumers calling `openFromURLString` / `present(url:)` (sdk-swift, sdk-react-native, sdk-flutter) need no change; their browser now stays open through those bounces.
+
 ## 0.4.0
 ### Breaking
 * `AudioInfoProvider.collect()` (and `collectAsDict()`) no longer configures or activates the shared `AVAudioSession`. It used to set `.playback` with `.mixWithOthers`, activate the session and install a volume observer on its first call, which overwrote the audio setup of an app with its own player. A consumer that relied on that calls `AudioInfoProvider.ensureSessionActive()` before its first `collect()`; sdk-swift: one call where it reads audio; sdk-swift-video: none. `isSoundOn()` and the OMID video session still activate the session, as before.
