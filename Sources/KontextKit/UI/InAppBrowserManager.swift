@@ -21,7 +21,9 @@ public final class InAppBrowserManager: NSObject, @preconcurrency SFSafariViewCo
         case done
         /// `dismiss()` was called, or UIKit had already taken the browser away
         /// without telling (the app dismissing its whole stack); the latter is
-        /// reported at the next `present` or `dismiss()`.
+        /// reported at the next `present` or `dismiss()`. Also a browser that
+        /// was waiting for the previous one to leave the screen and could then
+        /// not be shown.
         case dismissed
         /// A new `present` replaced it.
         case replaced
@@ -34,29 +36,57 @@ public final class InAppBrowserManager: NSObject, @preconcurrency SFSafariViewCo
     /// on screen; `isPresented` says whether it is open.
     public private(set) weak var presentedController: UIViewController?
 
-    /// A browser is open: presented, not closed since, and still held by UIKit.
-    public var isPresented: Bool { isOpen && presentedController != nil }
+    /// A browser is open: presented, not closed since, and still on screen (UIKit
+    /// presents it and is not dismissing it), or about to be shown once the
+    /// previous browser has left the screen.
+    public var isPresented: Bool {
+        guard isOpen, let vc = presentedController else { return false }
+        return vc === pending || isOnScreen(vc)
+    }
 
     private var isOpen = false
     private var onClose: (@MainActor (CloseReason) -> Void)?
     private var leftApp = false
     private var sceneObservers: [NSObjectProtocol] = []
+    /// Bumped by every `present` that passes its checks, so one that ran the old
+    /// browser's handler can tell whether that handler presented a browser itself.
+    private var session = 0
+    /// The scene of the view controller the browser was presented over, until the
+    /// browser is in a window of its own.
+    private weak var ownerScene: AnyObject?
+    /// The browser waiting for the previous one to leave the screen; held here
+    /// because UIKit does not hold it yet.
+    private var pending: UIViewController?
 
     private let notificationCenter: NotificationCenter
     private let topViewController: @MainActor () -> UIViewController?
     private let presentController: @MainActor (_ browser: UIViewController, _ presenter: UIViewController) -> Void
     private let dismissController: @MainActor (_ browser: UIViewController, _ animated: Bool) -> Void
+    private let presentingController: @MainActor (_ controller: UIViewController) -> UIViewController?
+    private let afterTransition: @MainActor (_ leaving: UIViewController, _ then: @escaping @MainActor @Sendable () -> Void) -> Void
+    private let sceneOf: @MainActor (_ controller: UIViewController) -> AnyObject?
+
+    /// How many transitions (or 50 ms ticks) a present waits for the previous
+    /// browser to leave the screen before it gives up.
+    private static let exitWaitLimit = 40
 
     init(
         notificationCenter: NotificationCenter = .default,
         topViewController: @escaping @MainActor () -> UIViewController? = { Scenes.topViewController() },
         presentController: @escaping @MainActor (UIViewController, UIViewController) -> Void = { $1.present($0, animated: true) },
-        dismissController: @escaping @MainActor (UIViewController, Bool) -> Void = { $0.dismiss(animated: $1) }
+        dismissController: @escaping @MainActor (UIViewController, Bool) -> Void = { $0.dismiss(animated: $1) },
+        presentingController: @escaping @MainActor (UIViewController) -> UIViewController? = { $0.presentingViewController },
+        afterTransition: @escaping @MainActor (UIViewController, @escaping @MainActor @Sendable () -> Void) -> Void
+            = InAppBrowserManager.waitForTransition,
+        sceneOf: @escaping @MainActor (UIViewController) -> AnyObject? = { $0.viewIfLoaded?.window?.windowScene }
     ) {
         self.notificationCenter = notificationCenter
         self.topViewController = topViewController
         self.presentController = presentController
         self.dismissController = dismissController
+        self.presentingController = presentingController
+        self.afterTransition = afterTransition
+        self.sceneOf = sceneOf
         super.init()
     }
 
@@ -68,9 +98,21 @@ public final class InAppBrowserManager: NSObject, @preconcurrency SFSafariViewCo
     }
 
     /// Presents `url` over `presenter`, or over the top-most view controller when nil.
-    /// `onClose` runs once, when this browser goes away for any reason. `false`, and
-    /// no `onClose`, when the URL is not http(s) or nothing can present it; an open
-    /// browser is then left as it was.
+    /// A controller that is being dismissed, or the browser going away, is skipped
+    /// for the one that presents it. `onClose` runs once, when this browser goes
+    /// away for any reason.
+    ///
+    /// `false`, and no `onClose`, when the URL is not http(s), nothing can present
+    /// it (no presenter, one not in a window, being dismissed, or already presenting
+    /// something else), or UIKit refuses it; in the first cases an open browser is
+    /// left as it was. Also `false` when the replaced browser's `onClose` presents a
+    /// browser of its own: that newer request wins and this one is dropped.
+    ///
+    /// When the previous browser is still leaving the screen (a present from its
+    /// `onClose`, or right after "Done"), the new one is shown once it has gone.
+    /// `true` then means it is on its way: `isPresented` is true and
+    /// `presentedController` is the new browser meanwhile, and if it can no longer
+    /// be shown its `onClose` gets `.dismissed`.
     @discardableResult
     public func present(
         url: URL,
@@ -78,23 +120,42 @@ public final class InAppBrowserManager: NSObject, @preconcurrency SFSafariViewCo
         onClose: (@MainActor (CloseReason) -> Void)?
     ) -> Bool {
         guard Self.isSupportedScheme(url) else { return false }
-        guard let top = presenter ?? topViewController() else { return false }
+        let outgoing = presentedController
+        guard let top = resolvePresenter(presenter ?? topViewController(), outgoing: outgoing) else { return false }
 
+        session += 1
+        let current = session
         let replaced = isPresented
-        if replaced, let existing = presentedController {
-            dismissController(existing, false)
+        if replaced, let outgoing {
+            dismissController(outgoing, false)
         }
         close(replaced ? .replaced : .dismissed)
+        // The old browser's handler presented a browser of its own: it is the newer
+        // request and now the managed one, so this one stands down.
+        guard session == current else { return false }
 
         let vc = SFSafariViewController(url: url)
         vc.delegate = self
         vc.modalPresentationStyle = .overFullScreen
-        presentController(vc, top)
 
         presentedController = vc
+        ownerScene = sceneOf(top)
         isOpen = true
         self.onClose = onClose
         startSceneObservers()
+
+        // The browser closed before (Done, `dismiss()`, the auto-dismiss) is still on
+        // screen over the presenter, animating away: UIKit would refuse a second
+        // presentation, so wait until it has gone.
+        if !replaced, let outgoing, presentingController(outgoing) === top {
+            pending = vc
+            waitForExit(of: outgoing, then: vc, over: top, session: current, attempts: Self.exitWaitLimit)
+            return true
+        }
+        guard show(vc, over: top) else {
+            abandon(vc)
+            return false
+        }
         return true
     }
 
@@ -129,11 +190,82 @@ public final class InAppBrowserManager: NSObject, @preconcurrency SFSafariViewCo
         close(.done)
     }
 
+    // MARK: - Presenting
+
+    /// The view controller to present over: `candidate`, or, while it is the
+    /// browser going away or being dismissed, the one presenting it. Nil when that
+    /// one cannot present: not in a window, being dismissed, or presenting
+    /// something other than the browser going away.
+    private func resolvePresenter(_ candidate: UIViewController?, outgoing: UIViewController?) -> UIViewController? {
+        var top = candidate
+        while let vc = top, vc === outgoing || vc.isBeingDismissed {
+            top = presentingController(vc)
+        }
+        guard let top, top.viewIfLoaded?.window != nil, !top.isBeingDismissed else { return nil }
+        if let shown = top.presentedViewController, shown !== outgoing { return nil }
+        return top
+    }
+
+    /// Presents `vc` over `top`; false when UIKit refused it (it attaches a
+    /// presentation it accepts at once).
+    private func show(_ vc: UIViewController, over top: UIViewController) -> Bool {
+        presentController(vc, top)
+        return presentingController(vc) != nil
+    }
+
+    private func waitForExit(
+        of outgoing: UIViewController,
+        then vc: UIViewController,
+        over top: UIViewController,
+        session: Int,
+        attempts: Int
+    ) {
+        afterTransition(outgoing) { [weak self, weak outgoing, weak top] in
+            guard let self, self.session == session, self.pending === vc else { return }
+            guard let top else {
+                self.close(.dismissed)
+                return
+            }
+            if let outgoing, attempts > 1, self.presentingController(outgoing) != nil {
+                self.waitForExit(of: outgoing, then: vc, over: top, session: session, attempts: attempts - 1)
+                return
+            }
+            self.pending = nil
+            guard self.resolvePresenter(top, outgoing: outgoing) === top, self.show(vc, over: top) else {
+                self.close(.dismissed)
+                return
+            }
+        }
+    }
+
+    /// Calls `then` when `leaving`'s transition ends, or after a short tick when
+    /// none is running.
+    static func waitForTransition(_ leaving: UIViewController, _ then: @escaping @MainActor @Sendable () -> Void) {
+        if let coordinator = leaving.transitionCoordinator ?? leaving.presentingViewController?.transitionCoordinator {
+            coordinator.animate(alongsideTransition: nil) { _ in
+                MainActor.assumeIsolated { then() }
+            }
+        } else {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                then()
+            }
+        }
+    }
+
+    /// Forgets a browser UIKit refused, without running its handler.
+    private func abandon(_ vc: UIViewController) {
+        guard presentedController === vc else { return }
+        presentedController = nil
+        onClose = nil
+        close(.dismissed)
+    }
+
     // MARK: - Closing
 
     private func dismiss(reason: CloseReason) -> Bool {
         let wasPresented = isPresented
-        if wasPresented, let vc = presentedController {
+        if wasPresented, pending == nil, let vc = presentedController {
             dismissController(vc, true)
         }
         close(reason)
@@ -145,6 +277,7 @@ public final class InAppBrowserManager: NSObject, @preconcurrency SFSafariViewCo
     private func close(_ reason: CloseReason) {
         isOpen = false
         leftApp = false
+        pending = nil
         stopSceneObservers()
         guard let handler = onClose else { return }
         onClose = nil
@@ -179,12 +312,12 @@ public final class InAppBrowserManager: NSObject, @preconcurrency SFSafariViewCo
 
     private func observe(
         _ name: Notification.Name,
-        _ handle: @escaping @MainActor @Sendable (InAppBrowserManager, UIScene?) -> Void
+        _ handle: @escaping @MainActor @Sendable (InAppBrowserManager, AnyObject?) -> Void
     ) -> NSObjectProtocol {
         notificationCenter.addObserver(forName: name, object: nil, queue: nil) { [weak self] note in
             // UIKit posts scene notifications on the main thread; handle them in place so
             // a background and the activation after it keep their order.
-            let scene = UncheckedSendable(note.object as? UIScene)
+            let scene = UncheckedSendable(note.object as AnyObject?)
             if Thread.isMainThread {
                 MainActor.assumeIsolated {
                     guard let self else { return }
@@ -199,11 +332,18 @@ public final class InAppBrowserManager: NSObject, @preconcurrency SFSafariViewCo
         }
     }
 
-    /// Another window scene of a multi-window app does not count; a notification
-    /// without a scene, or a browser not in a window yet, does.
-    private func isBrowserScene(_ scene: UIScene?) -> Bool {
-        guard let scene, let own = presentedController?.viewIfLoaded?.window?.windowScene else { return true }
+    /// The browser's scene: its own window's once it has one, before that the scene
+    /// of the view controller it was presented over. Another window scene of a
+    /// multi-window app does not count; a notification without a scene, or a
+    /// browser whose scene is not known, does.
+    private func isBrowserScene(_ scene: AnyObject?) -> Bool {
+        guard let scene else { return true }
+        guard let own = presentedController.flatMap(sceneOf) ?? ownerScene else { return true }
         return scene === own
+    }
+
+    private func isOnScreen(_ vc: UIViewController) -> Bool {
+        presentingController(vc) != nil && !vc.isBeingDismissed
     }
 
     // MARK: - Helpers
