@@ -19,9 +19,6 @@ public final class SKAdNetworkManager {
     /// The impression the single-slot methods drive.
     var current: SKAdImpressionSession?
 
-    @available(iOS 14.5, *)
-    var skImpression: SKAdImpression? { current?.skImpression }
-
     // Apple's calls, replaceable so tests can see what reaches StoreKit. Typed on `AnyObject` because a
     // stored property cannot carry the iOS 14.5 availability of `SKAdImpression`.
     static var appleStartImpression: @MainActor (AnyObject, @escaping @Sendable (Error?) -> Void) -> Void = { impression, done in

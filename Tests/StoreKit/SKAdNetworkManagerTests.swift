@@ -77,7 +77,7 @@ struct SKAdNetworkManagerTests {
 
         try await SKAdNetworkManager.shared.initImpression(params: Self.validParams())
 
-        let imp = SKAdNetworkManager.shared.skImpression
+        let imp = SKAdNetworkManager.shared.current?.skImpression
         #expect(imp != nil)
         #expect(imp?.version == "2.2")
         #expect(imp?.adNetworkIdentifier == "abc.skadnetwork")
@@ -107,7 +107,7 @@ struct SKAdNetworkManagerTests {
         ]
         try await SKAdNetworkManager.shared.initImpression(params: params)
 
-        let imp = SKAdNetworkManager.shared.skImpression
+        let imp = SKAdNetworkManager.shared.current?.skImpression
         #expect(imp?.adImpressionIdentifier == "from-f0")
         #expect(imp?.timestamp == NSNumber(value: 555))
         #expect(imp?.signature == "f0sig")
@@ -126,7 +126,7 @@ struct SKAdNetworkManagerTests {
         ]
         try await SKAdNetworkManager.shared.initImpression(params: params)
 
-        let imp = SKAdNetworkManager.shared.skImpression
+        let imp = SKAdNetworkManager.shared.current?.skImpression
         #expect(imp?.adImpressionIdentifier == "00000000-0000-0000-0000-000000000001")
         #expect(imp?.signature == "sig==")
 
@@ -141,7 +141,7 @@ struct SKAdNetworkManagerTests {
         params.removeValue(forKey: "sourceApp")
         try await SKAdNetworkManager.shared.initImpression(params: params)
 
-        #expect(SKAdNetworkManager.shared.skImpression?.sourceAppStoreItemIdentifier == NSNumber(value: 0))
+        #expect(SKAdNetworkManager.shared.current?.skImpression?.sourceAppStoreItemIdentifier == NSNumber(value: 0))
 
         try await SKAdNetworkManager.shared.dispose()
     }
@@ -154,7 +154,7 @@ struct SKAdNetworkManagerTests {
         params["sourceIdentifier"] = "1234"
         try await SKAdNetworkManager.shared.initImpression(params: params)
 
-        #expect(SKAdNetworkManager.shared.skImpression?.sourceIdentifier == NSNumber(value: 1234))
+        #expect(SKAdNetworkManager.shared.current?.skImpression?.sourceIdentifier == NSNumber(value: 1234))
 
         try await SKAdNetworkManager.shared.dispose()
     }

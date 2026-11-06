@@ -24,7 +24,9 @@ public final class SKAdImpressionSession {
     private var isEnded = false
     private var tail: Task<Void, Never>?
 
+    // Read by tests only; analyze doesn't see the test target.
     @available(iOS 14.5, *)
+    // swiftlint:disable:next unused_declaration
     var skImpression: SKAdImpression? { impressionBox as? SKAdImpression }
 
     init(impression: AnyObject) {
