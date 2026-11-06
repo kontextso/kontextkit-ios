@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+### Added
+* `InAppBrowserManager.present(url:from:onClose:)`: presents over a given view controller (the top-most one when nil; it should be a full-screen context) and calls `onClose` once, after that browser is off screen, with a `CloseReason`: `.done` (the user tapped "Done"; after Safari's own dismissal), `.dismissed` (`dismiss()`, in UIKit's dismissal completion; or UIKit took the browser away without telling, reported at the next `present`/`dismiss()`) or `.returnedToApp` (the auto-dismiss). If UIKit never reports the end of a dismissal, `onClose` still runs after 2 s, with the same reason. A `present` from `onClose` therefore just works. `present(url:)` and `openFromURLString(_:)` keep their signatures and pass no handler.
+* `InAppBrowserManager.isPresented` (a browser is open and UIKit really presents it, so one the app dismissed with its stack reads as closed even when something still holds the controller) and `presentedController` (weak; the browser presented last, kept while its dismissal animates, so a caller can recognise it on screen).
+* `present(url:from:onClose:)` returns `false`, with no `onClose`, also when the presenter cannot present (not in a window, being dismissed, or already presenting something) or UIKit refuses the presentation.
+* The auto-dismiss tells scenes apart from the presentation on: until the browser is in a window, its scene is the presenter's, so another scene's trip to the background does not arm it.
+
+### Changed
+* The auto-dismiss closes the browser only when the user comes back to the app after it entered the background (a deep link or App Store redirect sent them to another app), as its doc comment always said. It used to close on every `UIScene.didActivateNotification`, so pulling down Notification Center or Control Center over the browser, or a system alert, closed it too. Consumers calling `openFromURLString` / `present(url:)` (sdk-swift, sdk-react-native, sdk-flutter) need no change; their browser now stays open through those bounces.
+* One browser at a time: `present` (all three entry points) returns `false` while a browser is open, or closed but still leaving the screen, and leaves it alone; present again from `onClose`. It used to dismiss the open browser and present the new one at once, which UIKit can refuse while the old one is still attached. A consumer browser covers the app, so a second open while one is up is not expected.
+
 ## 0.4.0
 ### Breaking
 * `AudioInfoProvider.collect()` (and `collectAsDict()`) no longer configures or activates the shared `AVAudioSession`. It used to set `.playback` with `.mixWithOthers`, activate the session and install a volume observer on its first call, which overwrote the audio setup of an app with its own player. A consumer that relied on that calls `AudioInfoProvider.ensureSessionActive()` before its first `collect()`; sdk-swift: one call where it reads audio; sdk-swift-video: none. `isSoundOn()` and the OMID video session still activate the session, as before.
