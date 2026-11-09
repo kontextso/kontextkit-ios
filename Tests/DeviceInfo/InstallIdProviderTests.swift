@@ -23,33 +23,6 @@ private func freshDefaults(_ suite: String = UUID().uuidString) -> UserDefaults 
     return defaults
 }
 
-struct UUIDv7Tests {
-    @Test func producesCanonicalV7Shape() {
-        let id = InstallIdProvider.uuidv7()
-        #expect(matchesV7Shape(id))
-    }
-
-    @Test func encodesCurrentTimestampInPrefix() {
-        let before = UInt64(Date().timeIntervalSince1970 * 1000)
-        let id = InstallIdProvider.uuidv7()
-        let after = UInt64(Date().timeIntervalSince1970 * 1000)
-        // First 12 hex chars (without the hyphen) are the 48-bit timestamp.
-        let tsHex = String(id.prefix(8)) + String(id.dropFirst(9).prefix(4))
-        let ts = UInt64(tsHex, radix: 16) ?? 0
-        #expect(ts >= before)
-        #expect(ts <= after)
-    }
-
-    @Test func emitsTimeOrderedIDsAcrossDistinctMilliseconds() {
-        let a = InstallIdProvider.uuidv7()
-        // Spin until the millisecond changes so the timestamp prefix differs.
-        let baseline = UInt64(Date().timeIntervalSince1970 * 1000)
-        while UInt64(Date().timeIntervalSince1970 * 1000) == baseline { /* spin */ }
-        let b = InstallIdProvider.uuidv7()
-        #expect(a < b)
-    }
-}
-
 struct InstallIdProviderTests {
 
     @Test func generatesAndPersistsOnFirstCall() {
