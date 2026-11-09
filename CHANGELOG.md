@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 ### Added
 * `UUIDv7.generate()`: a UUID version 7 (RFC 9562) as a lowercase string, the generator `InstallIdProvider` has always used for the install id, now public so an SDK can make time-ordered ids of its own (sdk-swift-video's session id). Mirrors kontextkit-android's `UuidV7.generate()`.
 
