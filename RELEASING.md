@@ -96,7 +96,15 @@ pod trunk push KontextKit.podspec --allow-warnings --use-libraries
 
 First-time only: `pod trunk register support@kontext.so "Kontext"` and confirm via the link sent to that mailbox.
 
-## 8. Verify
+## 8. Publish the GitHub release
+
+Create the release from the tag, with the changelog section as its body, so the Releases page carries the notes:
+
+```bash
+gh release create 1.0.0 --title 1.0.0 --notes-file <(awk '/^## 1.0.0$/{f=1;next} /^## /{f=0} f' CHANGELOG.md)
+```
+
+## 9. Verify
 
 1. Check that the version is available on the [CocoaPods page](https://cocoapods.org/pods/KontextKit).
 2. Bump the consuming SDKs (sdk-swift, sdk-react-native, sdk-flutter, sdk-swift-video) to the new KontextKit version and confirm they build. sdk-swift takes both products (`KontextKit` + `KontextKitOM`, pod `KontextKit/OMSDK`); sdk-swift-video takes `KontextKit` alone.
