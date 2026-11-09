@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+### Added
+* `UUIDv7.generate()`: a UUID version 7 (RFC 9562) as a lowercase string, the generator `InstallIdProvider` has always used for the install id, now public so an SDK can make time-ordered ids of its own (sdk-swift-video's session id). Mirrors kontextkit-android's `UuidV7.generate()`.
+
 ## 0.5.0
 ### Added
 * `InAppBrowserManager.present(url:from:onClose:)`: presents over a given view controller (the top-most one when nil; it should be a full-screen context) and calls `onClose` once, after that browser is off screen, with a `CloseReason`: `.done` (the user tapped "Done"; after Safari's own dismissal), `.dismissed` (`dismiss()`, in UIKit's dismissal completion; or UIKit took the browser away without telling, reported at the next `present`/`dismiss()`) or `.returnedToApp` (the auto-dismiss). If UIKit never reports the end of a dismissal, `onClose` still runs after 2 s, with the same reason. A `present` from `onClose` therefore just works. `present(url:)` and `openFromURLString(_:)` keep their signatures and pass no handler.
